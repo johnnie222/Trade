@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Position Sizing & Stop-Loss Calculator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #111827; /* Dark Gray */
+            color: #F9FAFB; /* Light Gray */
+        }
+        .calculator-card {
+            background-color: #1F2937; /* Gray */
+            border: 1px solid #374151; /* Gray */
+            border-radius: 0.75rem;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            transition: all 0.3s ease-in-out;
+        }
+        .calculator-card:hover {
+            border-color: #3B82F6; /* Blue */
+        }
+        .input-field {
+            background-color: #374151;
+            color: #F9FAFB;
+            border: 1px solid #4B5563;
+            border-radius: 0.5rem;
+            padding: 0.75rem 1rem;
+            width: 100%;
+            transition: border-color 0.2s, box-shadow 0.2s;
+        }
+        .input-field:focus {
+            outline: none;
+            border-color: #3B82F6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.5);
+        }
+        .slider {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 8px;
+            border-radius: 5px;
+            background: #374151;
+            outline: none;
+            opacity: 0.7;
+            transition: opacity .2s;
+        }
+        .slider:hover {
+            opacity: 1;
+        }
+        .slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #3B82F6;
+            cursor: pointer;
+        }
+        .slider::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #3B82F6;
+            cursor: pointer;
+        }
+        .output-box {
+            background-color: #111827;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            border: 1px solid #4B5563;
+            min-height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+        }
+        .output-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            letter-spacing: -0.025em;
+        }
+        .summary-card {
+             background-color: #1F2937;
+             border: 1px dashed #4B5563;
+        }
+        .step-number {
+            background-color: #3B82F6;
+            color: white;
+            border-radius: 9999px;
+            width: 2.5rem;
+            height: 2.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 1.125rem;
+            flex-shrink: 0;
+        }
+        #summary-toggle-icon {
+            transition: transform 0.3s ease-in-out;
+        }
+    </style>
+</head>
+<body class="p-4 sm:p-6 md:p-8">
+
+    <div class="max-w-3xl mx-auto">
+        <header class="text-center mb-8">
+            <h1 class="text-3xl sm:text-4xl font-bold tracking-tight text-white">Dynamic Risk & Position Size Calculator</h1>
+            <p class="mt-2 text-lg text-gray-400">An interactive guide to disciplined trading for long positions.</p>
+        </header>
+
+        <main id="calculator-container">
+            <!-- Step 1: Account Risk -->
+            <div class="calculator-card" id="step1">
+                <div class="flex items-start space-x-4">
+                    <div class="step-number">1</div>
+                    <div>
+                        <h2 class="text-xl font-semibold text-white">Define Account Risk per Trade</h2>
+                        <p class="text-gray-400 mt-1">Decide the maximum percentage of your capital you're willing to risk on a single trade.</p>
+                    </div>
+                </div>
+                <div class="grid md:grid-cols-2 gap-6 mt-6">
+                    <div>
+                        <label for="accountBalance" class="block text-sm font-medium text-gray-300 mb-2">Account Balance ($)</label>
+                        <input type="number" id="accountBalance" class="input-field" value="10000" oninput="updateCalculations()">
+                    </div>
+                    <div>
+                        <label for="riskPercentage" class="block text-sm font-medium text-gray-300 mb-2">Risk Percentage (%)</label>
+                        <input type="range" min="0.1" max="10" value="1" step="0.1" class="slider" id="riskPercentage" oninput="updateCalculations()">
+                        <div class="text-center mt-2 text-gray-400"><span id="riskPercentageValue">1.0</span>%</div>
+                        <div id="riskScaleLabel" class="text-center text-sm font-medium mt-1 text-green-400 transition-colors duration-300">Conservative</div>
+                    </div>
+                </div>
+                <div class="mt-6">
+                    <h3 class="text-md font-medium text-gray-300 text-center">Maximum Loss Per Trade</h3>
+                    <div class="output-box mt-2">
+                        <span id="riskPerTrade" class="output-value text-green-400">$100.00</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 2: Stop-Loss Placement -->
+            <div class="calculator-card" id="step2">
+                 <div class="flex items-start space-x-4">
+                    <div class="step-number">2</div>
+                    <div>
+                        <h2 class="text-xl font-semibold text-white">Set a Logical Stop-Loss</h2>
+                        <p class="text-gray-400 mt-1">Define your invalidation point based on market structure and volatility.</p>
+                    </div>
+                </div>
+                <div class="grid md:grid-cols-3 gap-6 mt-6">
+                    <div>
+                        <label for="entryPrice" class="block text-sm font-medium text-gray-300 mb-2">Entry Price ($)</label>
+                        <input type="number" id="entryPrice" class="input-field" value="100" oninput="updateCalculations()">
+                    </div>
+                     <div>
+                        <label for="keyLevel" id="keyLevelLabel" class="block text-sm font-medium text-gray-300 mb-2">Support Level ($)</label>
+                        <input type="number" id="keyLevel" class="input-field" value="95" oninput="updateCalculations()">
+                    </div>
+                     <div>
+                        <label for="atr" class="block text-sm font-medium text-gray-300 mb-2">ATR / Buffer ($)</label>
+                        <input type="number" id="atr" class="input-field" value="2" oninput="updateCalculations()">
+                    </div>
+                </div>
+                 <div class="grid md:grid-cols-2 gap-6 mt-6">
+                     <div>
+                         <h3 class="text-md font-medium text-gray-300 text-center">Calculated Stop-Loss</h3>
+                         <div class="output-box mt-2">
+                             <span id="stopLossPrice" class="output-value text-red-400">$93.00</span>
+                         </div>
+                     </div>
+                     <div>
+                         <h3 class="text-md font-medium text-gray-300 text-center">Risk Per Share</h3>
+                         <div class="output-box mt-2">
+                             <span id="riskPerShare" class="output-value text-red-400">$7.00</span>
+                         </div>
+                     </div>
+                 </div>
+            </div>
+
+            <!-- Step 3: Position Size -->
+            <div class="calculator-card" id="step3">
+                <div class="flex items-start space-x-4">
+                    <div class="step-number">3</div>
+                    <div>
+                        <h2 class="text-xl font-semibold text-white">Calculate Position Size</h2>
+                        <p class="text-gray-400 mt-1">Your position size is determined by your risk, not your confidence.</p>
+                    </div>
+                </div>
+                <div class="mt-6">
+                    <p class="text-center text-gray-400 text-lg mb-4">
+                        <span id="posSizeCalc_risk" class="font-bold text-green-400">$100.00</span> (Max Loss) ÷ <span id="posSizeCalc_riskPerShare" class="font-bold text-red-400">$7.00</span> (Risk/Share)
+                    </p>
+                    <div class="grid md:grid-cols-2 gap-6">
+                        <div>
+                             <h3 class="text-md font-medium text-gray-300 text-center">Position Size (Shares)</h3>
+                             <div class="output-box mt-2">
+                                <span id="positionSize" class="output-value text-white">14.2857</span>
+                             </div>
+                        </div>
+                        <div>
+                             <h3 class="text-md font-medium text-gray-300 text-center">Position Value (USD)</h3>
+                             <div class="output-box mt-2">
+                                <span id="positionValue" class="output-value text-white">$1,428.57</span>
+                             </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 4: Reward:Risk Ratio -->
+            <div class="calculator-card" id="step4">
+                <div class="flex items-start space-x-4">
+                    <div class="step-number">4</div>
+                    <div>
+                        <h2 class="text-xl font-semibold text-white">Check Profit Potential</h2>
+                        <p class="text-gray-400 mt-1">Is the potential profit worth the risk? Aim for at least a 2:1 ratio.</p>
+                    </div>
+                </div>
+                <div class="mt-6">
+                    <label for="targetPrice" class="block text-sm font-medium text-gray-300 mb-2">Profit Target Price ($)</label>
+                    <input type="number" id="targetPrice" class="input-field" value="114" oninput="updateCalculations()">
+                </div>
+                <div class="grid md:grid-cols-2 gap-6 mt-6">
+                    <div>
+                        <h3 class="text-md font-medium text-gray-300 text-center">Total Potential Profit</h3>
+                        <div class="output-box mt-2">
+                             <span id="totalPotentialProfit" class="output-value text-green-400">$200.00</span>
+                        </div>
+                    </div>
+                    <div>
+                        <h3 class="text-md font-medium text-gray-300 text-center">Reward:Risk Ratio</h3>
+                        <div id="rrStatusBox" class="output-box mt-2 bg-green-500/10 border-green-500/30">
+                            <span id="rewardRiskRatio" class="output-value text-green-400">2.00 : 1</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Infographic Summary -->
+            <div class="calculator-card" id="infographic">
+                <div class="flex items-start space-x-4">
+                     <span class="text-3xl flex-shrink-0">📊</span>
+                    <div>
+                        <h2 class="text-xl font-semibold text-white">Trade Setup Visualized</h2>
+                        <p class="text-gray-400 mt-1">A visual breakdown of your trade's risk and reward zones.</p>
+                    </div>
+                </div>
+                <div class="mt-6 flex justify-center items-end" style="height: 200px;">
+                    <div class="w-1/2 max-w-xs h-full flex flex-col relative text-xs font-semibold">
+                        <!-- Profit Zone -->
+                        <div id="profit-zone" class="bg-green-500/20 w-full flex-grow relative flex items-start justify-center pt-2 rounded-t-md">
+                           <div class="absolute -top-5 w-full text-center text-green-400">
+                               Profit Target: <span id="infographic-target-price">$114.00</span>
+                           </div>
+                        </div>
+                        <!-- Entry Line -->
+                        <div class="h-px bg-blue-400 w-full relative">
+                             <div class="absolute -left-2 top-1/2 -translate-y-1/2 -translate-x-full text-blue-400 text-right">
+                                Entry: <span id="infographic-entry-price">$100.00</span>
+                             </div>
+                        </div>
+                        <!-- Loss Zone -->
+                        <div id="loss-zone" class="bg-red-500/20 w-full flex-grow relative flex items-end justify-center pb-2 rounded-b-md">
+                            <div class="absolute -bottom-5 w-full text-center text-red-400">
+                                Stop Loss: <span id="infographic-stop-price">$93.00</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Summary -->
+            <div class="calculator-card summary-card" id="summary">
+                 <div id="summary-toggle" class="flex items-center justify-between cursor-pointer">
+                    <div class="flex items-start space-x-4">
+                        <svg class="w-8 h-8 text-blue-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                        <div>
+                            <h2 class="text-xl font-semibold text-white">Summary Formulas</h2>
+                            <p class="text-gray-400 mt-1">The core logic behind your risk management.</p>
+                        </div>
+                    </div>
+                    <svg id="summary-toggle-icon" class="w-6 h-6 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" /></svg>
+                 </div>
+                <div id="formulas-content" class="hidden mt-6">
+                    <ul class="space-y-4 text-gray-300">
+                        <li class="p-4 bg-gray-900/50 rounded-lg"><strong>Risk per Trade</strong> = Account Balance × Risk %</li>
+                        <li class="p-4 bg-gray-900/50 rounded-lg"><strong>Stop-Loss</strong> = Support Level - Buffer</li>
+                        <li class="p-4 bg-gray-900/50 rounded-lg"><strong>Position Size</strong> = Risk per Trade ÷ (Entry Price - Stop Loss)</li>
+                        <li class="p-4 bg-gray-900/50 rounded-lg"><strong>Reward:Risk</strong> = (Target Price - Entry) ÷ (Entry - Stop Loss)</li>
+                    </ul>
+                </div>
+            </div>
+        </main>
+    </div>
+
+        <script>
+        // Function to format numbers as currency
+        const formatCurrency = (num) => {
+            return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(num);
+        };
+        
+        function updateCalculations() {
+            // --- Get values from all steps ---
+            const accountBalance = parseFloat(document.getElementById('accountBalance').value) || 0;
+            const riskPercentage = parseFloat(document.getElementById('riskPercentage').value) || 0;
+            const entryPrice = parseFloat(document.getElementById('entryPrice').value) || 0;
+            const keyLevel = parseFloat(document.getElementById('keyLevel').value) || 0;
+            const atr = parseFloat(document.getElementById('atr').value) || 0;
+            const targetPrice = parseFloat(document.getElementById('targetPrice').value) || 0;
+
+            // --- Perform Calculations ---
+            
+            // Step 1: Risk Per Trade
+            const riskPerTrade = accountBalance * (riskPercentage / 100);
+            document.getElementById('riskPercentageValue').textContent = riskPercentage.toFixed(1);
+            document.getElementById('riskPerTrade').textContent = formatCurrency(riskPerTrade);
+            
+            // Update Dynamic Risk Scale
+            const riskScaleLabel = document.getElementById('riskScaleLabel');
+            let scaleText = '';
+            let scaleColorClass = '';
+
+            if (riskPercentage <= 1.5) {
+                scaleText = 'Conservative';
+                scaleColorClass = 'text-green-400';
+            } else if (riskPercentage <= 3.0) {
+                scaleText = 'Balanced';
+                scaleColorClass = 'text-blue-400';
+            } else if (riskPercentage <= 5.0) {
+                scaleText = 'Aggressive';
+                scaleColorClass = 'text-yellow-400';
+            } else {
+                scaleText = 'High Risk';
+                scaleColorClass = 'text-red-400';
+            }
+            riskScaleLabel.textContent = scaleText;
+            riskScaleLabel.className = 'text-center text-sm font-medium mt-1 transition-colors duration-300 ' + scaleColorClass;
+
+
+            // Step 2: Stop-Loss & Risk Per Share
+            const stopLossPrice = keyLevel - atr;
+            const riskPerShare = (entryPrice > stopLossPrice) ? entryPrice - stopLossPrice : 0;
+            document.getElementById('stopLossPrice').textContent = formatCurrency(stopLossPrice);
+            document.getElementById('riskPerShare').textContent = formatCurrency(riskPerShare);
+            
+            // Step 3: Position Size (Fractional Shares)
+            const positionSize = (riskPerShare > 0) ? (riskPerTrade / riskPerShare) : 0;
+            document.getElementById('posSizeCalc_risk').textContent = formatCurrency(riskPerTrade);
+            document.getElementById('posSizeCalc_riskPerShare').textContent = formatCurrency(riskPerShare);
+            document.getElementById('positionSize').textContent = `${parseFloat(positionSize.toFixed(4))}`;
+            
+            const positionValue = positionSize * entryPrice;
+            document.getElementById('positionValue').textContent = formatCurrency(positionValue);
+
+            // Step 4: Reward:Risk Ratio
+            const profitPerShare = targetPrice > entryPrice ? targetPrice - entryPrice : 0;
+            const rewardRiskRatio = riskPerShare > 0 ? profitPerShare / riskPerShare : 0;
+            const totalPotentialProfit = profitPerShare * positionSize;
+            
+            document.getElementById('totalPotentialProfit').textContent = formatCurrency(totalPotentialProfit);
+            document.getElementById('rewardRiskRatio').textContent = `${rewardRiskRatio.toFixed(2)} : 1`;
+            
+            const rrBox = document.getElementById('rrStatusBox');
+            const rrText = document.getElementById('rewardRiskRatio');
+            
+            rrBox.className = 'output-box mt-2'; // Reset classes
+            rrText.className = 'output-value'; // Reset classes
+            
+            if (rewardRiskRatio >= 2) {
+                rrBox.classList.add('bg-green-500/10', 'border-green-500/30');
+                rrText.classList.add('text-green-400');
+            } else if (rewardRiskRatio >= 1) {
+                rrBox.classList.add('bg-yellow-500/10', 'border-yellow-500/30');
+                rrText.classList.add('text-yellow-400');
+            } else {
+                rrBox.classList.add('bg-red-500/10', 'border-red-500/30');
+                rrText.classList.add('text-red-400');
+            }
+
+            // --- Update Infographic ---
+            const profitZone = document.getElementById('profit-zone');
+            const lossZone = document.getElementById('loss-zone');
+
+            document.getElementById('infographic-target-price').textContent = formatCurrency(targetPrice);
+            document.getElementById('infographic-entry-price').textContent = formatCurrency(entryPrice);
+            document.getElementById('infographic-stop-price').textContent = formatCurrency(stopLossPrice);
+
+            if (profitPerShare > 0 && riskPerShare > 0) {
+                 const totalRange = profitPerShare + riskPerShare;
+                 const profitRatio = (profitPerShare / totalRange);
+                 const riskRatio = (riskPerShare / totalRange);
+                 profitZone.style.flexGrow = profitRatio;
+                 lossZone.style.flexGrow = riskRatio;
+            } else {
+                 profitZone.style.flexGrow = 1;
+                 lossZone.style.flexGrow = 1;
+            }
+        }
+
+        // --- Event Listeners ---
+        document.getElementById('summary-toggle').addEventListener('click', () => {
+            const content = document.getElementById('formulas-content');
+            const icon = document.getElementById('summary-toggle-icon');
+            content.classList.toggle('hidden');
+            icon.classList.toggle('rotate-180');
+        });
+
+        // Initial calculation on page load
+        window.onload = updateCalculations;
+    </script>
+</body>
+</html>
+
