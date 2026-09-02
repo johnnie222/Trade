@@ -1,0 +1,19 @@
+# The journal itself never belongs in the repo.
+*.db
+*.sqlite
+*.sqlite3
+/backups/
+/screenshots/
+/exports/
+*.backup.json
+journal-*.json
+
+# Environment
+.env
+.env.*
+
+# Build / tooling
+node_modules/
+dist/
+.DS_Store
+*.log

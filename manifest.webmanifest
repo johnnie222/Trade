@@ -1,0 +1,14 @@
+{
+  "name": "Trade Journal",
+  "short_name": "Journal",
+  "description": "A local-first journal for swing trades, denominated in R.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#101317",
+  "theme_color": "#101317",
+  "icons": [
+    { "src": "./icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
