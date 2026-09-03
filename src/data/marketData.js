@@ -1,28 +1,64 @@
 /**
- * Market data.
+ * Market data snapshots.
  *
- * Deliberately the thinnest layer in the product, and entirely optional. The
- * journal is fully usable with prices typed by hand; this only saves typing.
+ * There is deliberately no stream and no polling loop here. Quotes are fetched
+ * only when the UI asks for one: ticker entry, opening a trade, the Update
+ * prices button, or immediately before a price-sensitive action.
  *
- * THE CORS PROBLEM
- *
- * A browser can only read a response the server explicitly allows it to read.
- * Most free quote endpoints do not send `Access-Control-Allow-Origin`, so they
- * work in curl and fail in a page — which is why this file is written to fail
- * gracefully rather than to assume success. Every failure falls back to the
- * last known price, and manual entry always works.
- *
- * Swapping providers is a one-file change. That is the whole point of the shape.
+ * Provider order for the product is Twelve Data -> Yahoo -> manual entry.
+ * Twelve Data needs the user's own API key. The key is stored in localStorage,
+ * outside the journal database and outside backups, so it is never committed or
+ * exported with trading history.
  */
 
 export class ProviderError extends Error {}
 
-/**
- * Stooq serves free end-of-day CSV with no key and no rate limit worth
- * worrying about. Whether it is readable from a browser depends on headers we
- * cannot verify from here — Settings has a Test button that answers it in one
- * tap on the real device.
- */
+export const TWELVE_DATA_KEY = 'trade-journal:twelve-data-key';
+
+export function getTwelveDataKey(storage = globalThis.localStorage) {
+  try {
+    return storage?.getItem?.(TWELVE_DATA_KEY)?.trim() ?? '';
+  } catch {
+    return '';
+  }
+}
+
+export function setTwelveDataKey(value, storage = globalThis.localStorage) {
+  const key = String(value ?? '').trim();
+  try {
+    if (!storage?.setItem) return key;
+    if (key) storage.setItem(TWELVE_DATA_KEY, key);
+    else storage.removeItem(TWELVE_DATA_KEY);
+  } catch {
+    // Private browsing / storage policy can refuse localStorage. Price fetching
+    // still works for this session if the caller supplies apiKey directly.
+  }
+  return key;
+}
+
+export function twelveData(apiKey) {
+  const key = String(apiKey ?? '').trim();
+  return {
+    id: 'twelve',
+    label: 'Twelve Data',
+    url: (ticker) =>
+      `https://api.twelvedata.com/price?symbol=${encodeURIComponent(ticker.toUpperCase())}&apikey=${encodeURIComponent(key)}`,
+    parse(text, ticker) {
+      let payload;
+      try {
+        payload = JSON.parse(text);
+      } catch {
+        throw new ProviderError(`No data for ${ticker}`);
+      }
+      if (payload?.status === 'error') throw new ProviderError(payload.message || `No data for ${ticker}`);
+      const price = Number.parseFloat(payload?.price);
+      if (!Number.isFinite(price) || price <= 0) throw new ProviderError(`${ticker} not found`);
+      return { price, date: null, open: null, high: null, low: null, volume: null };
+    },
+  };
+}
+
+/** Kept as an explicit provider for tests / emergency fallback experiments. */
 export const stooq = {
   id: 'stooq',
   label: 'Stooq (free, end of day)',
@@ -36,10 +72,7 @@ export const stooq = {
     const row = Object.fromEntries(headers.map((h, i) => [h, values[i]]));
 
     const close = Number.parseFloat(row.close);
-    if (!Number.isFinite(close) || close <= 0) {
-      // Stooq answers an unknown symbol with N/D rather than an error status.
-      throw new ProviderError(`${ticker} not found`);
-    }
+    if (!Number.isFinite(close) || close <= 0) throw new ProviderError(`${ticker} not found`);
     return {
       price: close,
       date: row.date ?? null,
@@ -57,7 +90,7 @@ export const yahoo = {
   url: (ticker) =>
     `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
       ticker.toUpperCase()
-    )}?interval=1d&range=5d`,
+    )}?interval=1m&range=1d&includePrePost=true`,
 
   parse(text, ticker) {
     let payload;
@@ -69,9 +102,17 @@ export const yahoo = {
     const result = payload?.chart?.result?.[0];
     const meta = result?.meta;
     const closes = result?.indicators?.quote?.[0]?.close ?? [];
-    const price = Number(meta?.regularMarketPrice ?? [...closes].reverse().find(Number.isFinite));
+    const marketState = String(meta?.marketState ?? '').toUpperCase();
+    const sessionPrice = marketState.includes('POST')
+      ? meta?.postMarketPrice
+      : marketState.includes('PRE')
+        ? meta?.preMarketPrice
+        : meta?.regularMarketPrice;
+    const price = Number(
+      sessionPrice ?? meta?.regularMarketPrice ?? meta?.postMarketPrice ?? meta?.preMarketPrice ?? [...closes].reverse().find(Number.isFinite)
+    );
     if (!Number.isFinite(price) || price <= 0) throw new ProviderError(`${ticker} not found`);
-    const stamp = meta?.regularMarketTime;
+    const stamp = meta?.regularMarketTime ?? result?.timestamp?.at?.(-1);
     return {
       price,
       date: stamp ? new Date(stamp * 1000).toISOString().slice(0, 10) : null,
@@ -83,19 +124,34 @@ export const yahoo = {
   },
 };
 
-export const PROVIDERS = { stooq, yahoo };
+export const PROVIDERS = { stooq, yahoo, twelveData };
+// Backward-compatible generic default. The product UI explicitly supplies
+// defaultProviders(), whose order is Twelve Data -> Yahoo.
 export const DEFAULT_PROVIDERS = [stooq, yahoo];
 
+export function defaultProviders(apiKey = getTwelveDataKey()) {
+  const key = String(apiKey ?? '').trim();
+  return key ? [twelveData(key), yahoo] : [yahoo];
+}
+
 /**
- * @param {string} ticker
- * @param {object} [opts] { provider, fetchImpl, timeoutMs }
+ * Fetch one snapshot. A provider failure is quiet at the UI layer; after every
+ * configured provider fails, callers retain the last saved price and can fall
+ * through to manual entry.
  */
 export async function fetchQuote(
   ticker,
-  { provider = null, providers = DEFAULT_PROVIDERS, fetchImpl = globalThis.fetch, timeoutMs = 8000 } = {}
+  {
+    provider = null,
+    providers = null,
+    apiKey = getTwelveDataKey(),
+    fetchImpl = globalThis.fetch,
+    timeoutMs = 8000,
+  } = {}
 ) {
-  const attempts = provider ? [provider] : providers;
+  const attempts = provider ? [provider] : providers ?? DEFAULT_PROVIDERS;
   let lastError = null;
+
   for (const source of attempts) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -111,21 +167,17 @@ export async function fetchQuote(
       clearTimeout(timer);
     }
   }
+
   throw lastError ?? new ProviderError('Could not reach the price source from the browser');
 }
 
 /* ------------------------------------------------------------------ */
-/* Freshness                                                           */
+/* Compatibility helpers                                               */
 /* ------------------------------------------------------------------ */
 
+// Still exported because older tests / saved code may import it, but the app no
+// longer calls it. Price refreshes are now event-driven, never boot-driven.
 export const AUTO_UPDATE_MIN_AGE_MIN = 30;
-
-/**
- * One refresh per app open, and not more often than every half hour.
- *
- * Reopening the app three times in a minute should not mean three round trips
- * for the same end-of-day number that will not change until tomorrow.
- */
 export function shouldAutoUpdate({ enabled, lastRunAt, now = new Date(), minAgeMin = AUTO_UPDATE_MIN_AGE_MIN }) {
   if (!enabled) return { update: false, reason: 'auto-update is off' };
   if (!lastRunAt) return { update: true, reason: 'never run' };
@@ -135,7 +187,6 @@ export function shouldAutoUpdate({ enabled, lastRunAt, now = new Date(), minAgeM
     : { update: false, reason: 'checked recently' };
 }
 
-/** Age of a stored price, for the freshness indicator. */
 export function priceAge(entry, now = new Date()) {
   if (!entry?.at) return null;
   const hours = (new Date(now) - new Date(entry.at)) / 3600000;
@@ -145,19 +196,9 @@ export function priceAge(entry, now = new Date()) {
 }
 
 /* ------------------------------------------------------------------ */
-/* The queue                                                           */
+/* Queue                                                               */
 /* ------------------------------------------------------------------ */
 
-/**
- * Fetch tickers one at a time, reporting progress as it goes.
- *
- * Sequential rather than parallel on purpose. A handful of open positions is
- * a handful of requests, and firing them together is the surest way to get
- * throttled by a free endpoint for no gain a person could perceive.
- *
- * One failure never stops the run. A ticker that cannot be fetched keeps its
- * last known price and is reported; the rest still update.
- */
 export async function updatePrices(tickers, { onProgress = () => {}, gapMs = 250, ...opts } = {}) {
   const results = { updated: [], failed: [], total: tickers.length };
 
@@ -176,7 +217,6 @@ export async function updatePrices(tickers, { onProgress = () => {}, gapMs = 250
   return results;
 }
 
-/** One-line summary for the toast. */
 export function summarize(results) {
   const { updated, failed } = results;
   if (!updated.length && !failed.length) return 'Nothing to update';
