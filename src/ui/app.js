@@ -12,7 +12,14 @@ import { autoBackup } from '../data/browserBackup.js';
 import * as E from '../core/events.js';
 import { tradeSummary } from '../core/metrics.js';
 import { resolveRule, withTradeTrailing } from '../core/stopRules.js';
-import { fetchQuote, updatePrices, summarize, defaultProviders } from '../data/marketData.js';
+import {
+  fetchQuote,
+  fetchLogo,
+  getTwelveDataKey,
+  updatePrices,
+  summarize,
+  defaultProviders,
+} from '../data/marketData.js';
 import { updateMarketClock } from './marketClock.js';
 
 import { renderHome } from './screens/home.js';
@@ -39,6 +46,8 @@ export const state = {
   priceSync: null,
   /** Quotes are observations, not trade events. */
   prices: {},
+  /** Cached Twelve Data logo URLs. { TICKER: { url, checkedAt } } */
+  logos: {},
   highs: {},
   priceSheet: null,
   toast: null,
@@ -87,6 +96,7 @@ async function loadSettings() {
     if (v != null) state.settings[k] = v;
   }
   state.prices = (await state.repo.getSetting('prices', {})) ?? {};
+  state.logos = (await state.repo.getSetting('tickerLogos', {})) ?? {};
   state.highs = (await state.repo.getSetting('priceHighs', {})) ?? {};
 }
 
@@ -129,6 +139,7 @@ export const openTrades = () => state.trades.filter((t) => t.status === 'OPEN');
 export const closedTrades = () => state.trades.filter((t) => t.status === 'CLOSED');
 export const summaries = () => state.trades.map((t) => tradeSummary(t));
 export const priceFor = (ticker) => state.prices[ticker] ?? null;
+export const logoFor = (ticker) => state.logos[ticker]?.url ?? null;
 export const rule = (tradeOrKey) => {
   const trade = typeof tradeOrKey === 'object' ? tradeOrKey : null;
   const base = resolveRule(trade?.rule ?? tradeOrKey, state.settings);
@@ -159,8 +170,16 @@ export async function setSetting(key, value) {
   await state.repo.setSetting(key, value);
 }
 
+/** Manual prices intentionally carry no fabricated daily comparison. */
 export async function setPrice(ticker, value, source = 'manual') {
-  state.prices[ticker] = { price: value, at: new Date().toISOString(), source };
+  state.prices[ticker] = {
+    price: value,
+    at: new Date().toISOString(),
+    source,
+    previousClose: null,
+    change: null,
+    dailyPercent: null,
+  };
   for (const trade of openTrades().filter((t) => t.ticker === ticker)) {
     state.highs[trade.id] = Math.max(state.highs[trade.id] ?? trade.entryPrice, value);
   }
@@ -175,17 +194,42 @@ function sourceLabel(provider) {
   return provider || 'market data';
 }
 
+async function ensureLogo(ticker) {
+  const symbol = String(ticker ?? '').trim().toUpperCase();
+  if (!symbol || state.logos[symbol] || !getTwelveDataKey()) return state.logos[symbol]?.url ?? null;
+  const url = await fetchLogo(symbol);
+  // Cache failures too. A missing logo should not cost another API credit every refresh.
+  state.logos[symbol] = { url: url || null, checkedAt: new Date().toISOString() };
+  await state.repo.setSetting('tickerLogos', state.logos);
+  return url;
+}
+
 async function saveQuote(ticker, q) {
   state.prices[ticker] = {
     price: q.price,
     at: new Date().toISOString(),
-    source: `${sourceLabel(q.provider)}${q.date ? ` · ${q.date}` : ''}`,
+    source: sourceLabel(q.provider),
+    previousClose: q.previousClose ?? null,
+    change: q.change ?? null,
+    dailyPercent: q.dailyPercent ?? null,
+    quoteDate: q.date ?? null,
+    quoteDatetime: q.datetime ?? null,
+    name: q.name ?? null,
+    exchange: q.exchange ?? null,
+    open: q.open ?? null,
+    high: q.high ?? null,
+    low: q.low ?? null,
+    volume: q.volume ?? null,
+    averageVolume: q.averageVolume ?? null,
+    isMarketOpen: q.isMarketOpen ?? null,
+    fiftyTwoWeek: q.fiftyTwoWeek ?? null,
   };
   for (const trade of openTrades().filter((t) => t.ticker === ticker)) {
     state.highs[trade.id] = Math.max(state.highs[trade.id] ?? trade.entryPrice, q.price);
   }
   await state.repo.setSetting('prices', state.prices);
   await state.repo.setSetting('priceHighs', state.highs);
+  await ensureLogo(ticker);
 }
 
 /** Fetch one on-demand snapshot. Failure is intentionally silent. */
