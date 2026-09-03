@@ -1,24 +1,20 @@
 /**
- * Service worker.
- *
- * Cache-first for the shell. This app has no server and no remote data in
- * Phase 1, so once it is installed there is nothing that needs the network and
- * it should never wait on one.
- *
- * The version string is the cache key: bump it to ship an update. Old caches
- * are deleted on activate, so a stale shell cannot survive a release.
+ * Service worker. Cache-first for the application shell.
+ * Bump VERSION on every release so installed phones cannot retain stale UI.
  */
 
-const VERSION = 'tj-v5';
+const VERSION = 'tj-v6';
 const SHELL = [
   './',
   './index.html',
   './manifest.webmanifest',
   './icon.svg',
   './src/ui/styles.css',
+  './src/ui/release.css',
   './src/ui/app.js',
   './src/ui/registry.js',
   './src/ui/format.js',
+  './src/ui/marketClock.js',
   './src/ui/screens/home.js',
   './src/ui/screens/newTrade.js',
   './src/ui/screens/trades.js',
@@ -62,7 +58,6 @@ self.addEventListener('fetch', (e) => {
         hit ??
         fetch(e.request)
           .then((res) => {
-            // Cache same-origin successes so a file missed at install still lands.
             if (res.ok && new URL(e.request.url).origin === location.origin) {
               const copy = res.clone();
               caches.open(VERSION).then((c) => c.put(e.request, copy));
