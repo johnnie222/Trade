@@ -1,23 +1,11 @@
 /**
- * New trade.
- *
- * The most important screen in the product. Everything here serves one number:
- * how long it takes to get a real trade recorded. Four fields, live
- * calculation, one button.
- *
- * There is no Calculate button and no confirmation step. The calculation panel
- * updates on every keystroke, so by the time the trader reaches the button they
- * have already seen the risk they are about to record.
- *
- * Advanced fields exist but are collapsed. A trader who never opens them still
- * gets a complete, fully-analysable trade — setup and thesis improve the
- * reviews, they are not required to have one.
+ * New trade. Four core fields, live calculation, one button.
  */
 
 import { ACTIONS, LIVE } from '../registry.js';
-import { state, createTrade, go, toast, ev, setPrice } from '../app.js';
+import { state, createTrade, go, toast, ev, setPrice, refreshPrice } from '../app.js';
 import { PRESETS } from '../../core/stopRules.js';
-import { price as fmtPrice, dollars, rval, pct, esc } from '../format.js';
+import { price as fmtPrice, dollars, pct, esc } from '../format.js';
 
 const SETUPS = ['Breakout', 'Pullback', 'Support Bounce', 'Trend Continuation', 'Gap', 'Reversal', 'Base Breakout'];
 const EMOTIONS = ['Calm', 'Confident', 'FOMO', 'Unsure'];
@@ -42,7 +30,6 @@ const numOrNull = (v) => {
   return Number.isFinite(n) ? n : null;
 };
 
-/** Everything derivable from entry, stop and size. Recomputed per keystroke. */
 export function calc(d, settings) {
   const entry = numOrNull(d.entry);
   const stop = numOrNull(d.stop);
@@ -109,7 +96,7 @@ export function renderNewTrade(s) {
     <form id="new-trade" onsubmit="return false">
       <div class="field">
         <label class="label" for="f-ticker">Ticker</label>
-        <input id="f-ticker" class="ticker" data-live="new" data-k="ticker" value="${esc(d.ticker)}"
+        <input id="f-ticker" class="ticker" data-live="new" data-k="ticker" data-quote-ticker value="${esc(d.ticker)}"
                autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="DELL" enterkeyhint="next">
       </div>
 
@@ -188,17 +175,11 @@ export function renderNewTrade(s) {
     </form>`;
 }
 
-/* ------------------------------------------------------------------ */
-
 LIVE.new = (el) => {
   const d = draft();
   const k = el.dataset.k;
   d[k] = k === 'ticker' ? el.value.toUpperCase() : el.value;
 
-  // Only the calculation panel and the button depend on these keys, so the
-  // whole-screen re-render is confined to the fields that change the maths.
-  // Re-rendering on every keystroke would move the caret out from under the
-  // person typing.
   if (['entry', 'stop', 'qty'].includes(k)) {
     const c = calc(d, state.settings);
     document.querySelector('.calc')?.outerHTML && replaceCalc(c);
@@ -219,6 +200,24 @@ function replaceCalc(c) {
   wrap.innerHTML = calcPanel(c);
   node.replaceWith(wrap.firstElementChild);
 }
+
+// Snapshot on ticker completion (change/blur), not on every keystroke.
+document.addEventListener('change', async (e) => {
+  const input = e.target.closest?.('[data-quote-ticker]');
+  if (!input) return;
+  const d = draft();
+  const ticker = input.value.trim().toUpperCase();
+  if (!ticker) return;
+  const quote = await refreshPrice(ticker);
+  if (!quote || d.entry) return;
+  // Do not overwrite an entry the user started typing while the request was in flight.
+  d.entry = String(quote.price);
+  const entry = document.getElementById('f-entry');
+  if (entry && !entry.value) {
+    entry.value = d.entry;
+    LIVE.new(entry);
+  }
+});
 
 ACTIONS.pick = (el) => {
   const d = draft();
@@ -260,8 +259,6 @@ ACTIONS.openTrade = async () => {
         rule: d.rule,
       })
     );
-    // Seed the price cache with the fill, so the trade shows a sensible
-    // current price immediately instead of an empty dash.
     await setPrice(trade.ticker, c.entry, 'entry fill');
     state.draft.new = null;
     go(`trade/${trade.id}`);
