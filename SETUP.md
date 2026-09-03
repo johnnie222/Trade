@@ -68,7 +68,7 @@ On iPhone: Safari → Share → **Add to Home Screen**.
 
 1. **Settings → Account size.** Everything risk-related reads from this one number.
 2. **Settings → Default risk per trade.** 1% is the default. It drives the suggested position size and is never enforced.
-3. **Settings → Default stop rule.** `1R→BE, 2R→1R, 3R→2R` is preselected. `Trail 1.5R below high` is the other one worth trying. You can change it per trade.
+3. **Settings → Default stop rule.** `1R→BE, 2R→1R, 3R→2R` is preselected. After a trade reaches 3R, choose manual management or configure a percentage / dollar broker trail on that trade.
 4. **Settings → Choose folder** (Chrome only). Backups then write there silently instead of landing in Downloads.
 5. Add a trade. Ticker, entry, stop, shares — the risk, the R targets and the suggested size appear as you type.
 
@@ -76,7 +76,7 @@ On iPhone: Safari → Share → **Add to Home Screen**.
 
 ## 4. Day to day
 
-**Home** is the only screen you need most days. Tap **Update prices** and type the last price for each open ticker. Every R figure, the rule flag and the risk total recompute from that.
+**Home** is the only screen you need most days. Tap **Update prices**. The app first tries public end-of-day feeds; any missing quotes open in a manual price sheet. The sheet keeps the values you typed while you switch to another app or reload. Every R figure, rule flag and risk total recompute from the saved prices.
 
 **When a stop rule triggers**, Home shows what it says. Two buttons: raise, or skip. If you skip, it asks why once — that sentence is the single most useful thing in the weekly review, so it is worth answering honestly.
 

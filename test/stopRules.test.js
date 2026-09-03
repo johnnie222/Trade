@@ -1,7 +1,14 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { evaluateStopRule, simulateRule, resolveRule, RuleType, PRESETS } from '../src/core/stopRules.js';
+import {
+  evaluateStopRule,
+  simulateRule,
+  resolveRule,
+  withTradeTrailing,
+  RuleType,
+  PRESETS,
+} from '../src/core/stopRules.js';
 
 const near = (a, b, msg, tol = 1e-6) =>
   assert.ok(Math.abs(a - b) < tol, `${msg ?? ''} expected ${b}, got ${a}`);
@@ -258,5 +265,37 @@ describe('ladder handing off to a trail', () => {
     const r = simulateRule(rule(), { entryPrice: 100, initialStop: 95, riskPerShare: 5, bars });
     near(r.exitPrice, 126);
     near(r.resultR, 5.2, 'the trail banked far more than the ladder would have');
+  });
+});
+
+describe('per-trade trailing after 3R', () => {
+  test('does not start before 3R', () => {
+    const rule = withTradeTrailing(PRESETS.ladderClassic, {
+      trailType: RuleType.TRAIL_PCT,
+      trailValue: 10,
+    });
+    near(evaluateStopRule(rule, ctx(114)).ruleStop, 105);
+  });
+
+  test('keeps a hard 2R floor at activation', () => {
+    const rule = withTradeTrailing(PRESETS.ladderClassic, {
+      trailType: RuleType.TRAIL_PCT,
+      trailValue: 10,
+    });
+    near(evaluateStopRule(rule, ctx(115)).ruleStop, 110);
+  });
+
+  test('the trail takes over above the floor and supports dollars', () => {
+    const pctRule = withTradeTrailing(PRESETS.ladderClassic, {
+      trailType: RuleType.TRAIL_PCT,
+      trailValue: 10,
+    });
+    near(evaluateStopRule(pctRule, ctx(130)).ruleStop, 117);
+
+    const usdRule = withTradeTrailing(PRESETS.ladderClassic, {
+      trailType: RuleType.TRAIL_USD,
+      trailValue: 7,
+    });
+    near(evaluateStopRule(usdRule, ctx(130)).ruleStop, 123);
   });
 });

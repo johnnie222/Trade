@@ -8,7 +8,7 @@
  */
 
 import { ACTIONS } from '../registry.js';
-import { state, priceFor, append, ev, rule, toast, go, refresh, setPrice } from '../app.js';
+import { state, priceFor, append, ev, rule, toast, go, refresh, setPrice, render } from '../app.js';
 import {
   currentR,
   realizedR,
@@ -30,7 +30,7 @@ const find = (id) => state.trades.find((t) => t.id === id);
 
 function rulePanel(t, p) {
   if (!t.rule || t.rule === 'discretionary') return '';
-  const preset = rule(t.rule);
+  const preset = rule(t);
   if (!p) {
     return `<div class="card"><span class="label">Stop rule</span>
       <p style="margin:var(--sp-2) 0 0">${esc(preset.label)}</p>
@@ -41,7 +41,7 @@ function rulePanel(t, p) {
     entryPrice: t.entryPrice,
     riskPerShare: t.riskPerShare,
     activeStop: t.activeStop,
-    highestClose: p.price,
+    highestClose: state.highs[t.id] ?? p.price,
     currentPrice: p.price,
   });
 
@@ -73,6 +73,62 @@ function rulePanel(t, p) {
         <button class="btn" data-action="skipRule" data-id="${t.id}" data-stop="${r.target}">Skip</button>
       </div>
     </div>`;
+}
+
+function managementPanel(t, p) {
+  if (!p || t.rule !== 'ladderClassic') return '';
+  const highest = state.highs[t.id] ?? p.price;
+  const highR = (highest - t.entryPrice) / t.riskPerShare;
+  if (highR < 3) return '';
+  const configuring = state.draft.trailFor === t.id;
+  const trailing = t.managementMode === 'trailing';
+  const typeLabel = t.trailType === 'TRAIL_USD' ? 'dollars' : 'percent';
+  const valueLabel = t.trailType === 'TRAIL_USD' ? `$${t.trailValue}` : `${t.trailValue}%`;
+
+  if (configuring) {
+    return `<div class="card management-card">
+      <span class="label">After 3R</span>
+      <h3>Broker trailing stop</h3>
+      <p class="muted">The calculated stop can rise, but it can never fall below 2R.</p>
+      <div class="field">
+        <label class="label" for="trail-type-${t.id}">Distance type</label>
+        <select id="trail-type-${t.id}">
+          <option value="TRAIL_PCT" ${t.trailType !== 'TRAIL_USD' ? 'selected' : ''}>Percent</option>
+          <option value="TRAIL_USD" ${t.trailType === 'TRAIL_USD' ? 'selected' : ''}>Dollars</option>
+        </select>
+      </div>
+      <div class="field">
+        <label class="label" for="trail-value-${t.id}">Distance</label>
+        <input id="trail-value-${t.id}" inputmode="decimal" value="${t.trailValue ?? 8}">
+      </div>
+      <div class="btn-row">
+        <button class="btn primary" data-action="saveTrailing" data-id="${t.id}">Use trailing stop</button>
+        <button class="btn" data-action="cancelTrailing">Cancel</button>
+      </div>
+    </div>`;
+  }
+
+  return `<div class="card management-card">
+    <div class="card-head">
+      <div><span class="label">After 3R</span><h3>${trailing ? 'Trailing at the broker' : 'Manual management'}</h3></div>
+      <span class="pill ${trailing ? 'pos' : ''}">${trailing ? valueLabel : 'Manual'}</span>
+    </div>
+    <p class="muted">
+      ${
+        trailing
+          ? `Trail by ${valueLabel} from the highest observed price, with a hard 2R floor.`
+          : 'Manage closely and raise the stop manually when your structure says so.'
+      }
+    </p>
+    <div class="btn-row">
+      <button class="btn ${trailing ? '' : 'primary'}" data-action="manualManagement" data-id="${t.id}">
+        Manual
+      </button>
+      <button class="btn ${trailing ? 'primary' : ''}" data-action="configureTrailing" data-id="${t.id}">
+        ${trailing ? `Change ${typeLabel}` : 'Set trailing'}
+      </button>
+    </div>
+  </div>`;
 }
 
 const EVENT_LINE = {
@@ -173,7 +229,7 @@ export function renderTradeDetail(s) {
       ${
         isOpen
           ? `<div class="btn-row" style="margin-top:var(--sp-4)">
-               <button class="chip" data-action="setPrice" data-id="${t.id}">
+               <button class="chip" data-action="openPriceSheet" data-ticker="${t.ticker}">
                  ${p ? `${fmtPrice(p.price)} · ${esc(p.source)}` : 'Add price'}
                </button>
              </div>`
@@ -181,7 +237,7 @@ export function renderTradeDetail(s) {
       }
     </section>
 
-    ${isOpen ? rulePanel(t, p) : ''}
+    ${isOpen ? rulePanel(t, p) + managementPanel(t, p) : ''}
 
     ${
       t.thesis || t.invalidation
@@ -257,15 +313,6 @@ const askNum = (label, fallback = '') => {
   return Number.isFinite(n) ? n : null;
 };
 
-ACTIONS.setPrice = async (el) => {
-  const t = find(el.dataset.id);
-  const current = priceFor(t.ticker)?.price ?? '';
-  const v = askNum(`Last price for ${t.ticker}`, current);
-  if (v == null || v <= 0) return;
-  await setPrice(t.ticker, v, 'manual');
-  toast(`${t.ticker} ${fmtPrice(v)}`);
-};
-
 ACTIONS.applyRule = async (el) => {
   const stop = Number.parseFloat(el.dataset.stop);
   await append(
@@ -273,6 +320,40 @@ ACTIONS.applyRule = async (el) => {
     ev.stopChange(new Date().toISOString(), { to: stop, reason: 'stop rule', source: 'rule' }),
     `Stop raised to ${fmtPrice(stop)}`
   );
+};
+
+ACTIONS.configureTrailing = (el) => {
+  state.draft.trailFor = el.dataset.id;
+  render();
+};
+
+ACTIONS.cancelTrailing = () => {
+  state.draft.trailFor = null;
+  render();
+};
+
+ACTIONS.saveTrailing = async (el) => {
+  const type = document.getElementById(`trail-type-${el.dataset.id}`)?.value;
+  const value = Number.parseFloat(document.getElementById(`trail-value-${el.dataset.id}`)?.value);
+  try {
+    await state.repo.setManagementPlan(el.dataset.id, {
+      managementMode: 'trailing',
+      trailType: type,
+      trailValue: value,
+    });
+    state.draft.trailFor = null;
+    await refresh();
+    toast('Trailing plan saved');
+  } catch (err) {
+    toast(err.message);
+  }
+};
+
+ACTIONS.manualManagement = async (el) => {
+  await state.repo.setManagementPlan(el.dataset.id, { managementMode: 'manual' });
+  state.draft.trailFor = null;
+  await refresh();
+  toast('Manual management');
 };
 
 /**

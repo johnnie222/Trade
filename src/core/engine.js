@@ -54,6 +54,9 @@ export function projectTrade(events, meta = {}) {
     // any field the trade record also carries must be seeded from meta here, or
     // the default silently overwrites it.
     rule: meta.rule ?? null,
+    managementMode: meta.managementMode ?? 'manual',
+    trailType: meta.trailType ?? null,
+    trailValue: meta.trailValue ?? null,
     splitFactor: 1, // cumulative shares-out / shares-in
 
     stopHistory: [],

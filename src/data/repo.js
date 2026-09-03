@@ -55,6 +55,9 @@ export class Repository {
       timeframe: meta.timeframe ?? null,
       entryEmotion: meta.entryEmotion ?? null,
       rule: meta.rule ?? null,
+      managementMode: meta.managementMode ?? 'manual',
+      trailType: meta.trailType ?? null,
+      trailValue: meta.trailValue ?? null,
       levels: meta.levels ?? [],
       lesson: meta.lesson ?? null,
       planFollowed: meta.planFollowed ?? null,
@@ -82,6 +85,26 @@ export class Repository {
     await this.store.put('events', record);
     await this.store.put('trades', { ...trade, updatedAt: new Date().toISOString() });
     return record;
+  }
+
+  async setManagementPlan(tradeId, plan) {
+    const trade = await this.store.get('trades', tradeId);
+    if (!trade) throw new TradeError(`No such trade: ${tradeId}`);
+    const next = {
+      ...trade,
+      managementMode: plan.managementMode === 'trailing' ? 'trailing' : 'manual',
+      trailType: plan.managementMode === 'trailing' ? plan.trailType : null,
+      trailValue: plan.managementMode === 'trailing' ? Number(plan.trailValue) : null,
+      updatedAt: new Date().toISOString(),
+    };
+    if (
+      next.managementMode === 'trailing' &&
+      (!['TRAIL_PCT', 'TRAIL_USD'].includes(next.trailType) || !(next.trailValue > 0))
+    ) {
+      throw new TradeError('Choose percent or dollars and enter a positive trail');
+    }
+    await this.store.put('trades', next);
+    return this.getTrade(tradeId);
   }
 
   /** Correct a past event in place, and record that a correction happened. */

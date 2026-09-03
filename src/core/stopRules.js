@@ -43,7 +43,7 @@ export const PRESETS = {
 
   ladderClassic: {
     type: RuleType.LADDER,
-    label: '1R→BE, 2R→1R, 3R→2R, then manual',
+    label: '1R→BE, 2R→1R, 3R→2R, then choose',
     rungs: [
       { triggerR: 1, stopR: 0 },
       { triggerR: 2, stopR: 1 },
@@ -97,6 +97,20 @@ export function resolveRule(key, settings = {}) {
   return preset.type === RuleType.LADDER
     ? { ...preset, label: `1R→BE, 2R→1R, then trail ${suffix}`, then: leg }
     : { ...preset, ...leg, label: `Trail ${suffix} from the start` };
+}
+
+/** Add the broker-supported trailing leg chosen for one specific trade. */
+export function withTradeTrailing(rule, { trailType, trailValue } = {}) {
+  if (!rule || rule.type !== RuleType.LADDER) return rule;
+  if (![RuleType.TRAIL_PCT, RuleType.TRAIL_USD].includes(trailType)) return rule;
+  const value = Number(trailValue);
+  if (!(value > 0)) return rule;
+  const then =
+    trailType === RuleType.TRAIL_PCT
+      ? { type: RuleType.TRAIL_PCT, pct: value }
+      : { type: RuleType.TRAIL_USD, usd: value };
+  const suffix = trailType === RuleType.TRAIL_PCT ? `${value}%` : `$${value}`;
+  return { ...rule, then, label: `1R→BE, 2R→1R, 3R→2R floor, then trail ${suffix}` };
 }
 
 /**

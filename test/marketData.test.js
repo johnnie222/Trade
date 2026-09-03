@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   stooq,
+  yahoo,
   fetchQuote,
   updatePrices,
   shouldAutoUpdate,
@@ -12,6 +13,14 @@ import {
 } from '../src/data/marketData.js';
 
 const CSV = 'Symbol,Date,Time,Open,High,Low,Close,Volume\nAAPL.US,2026-08-28,22:00:03,231.5,234.2,230.8,233.4,41230000\n';
+const YAHOO = JSON.stringify({
+  chart: {
+    result: [{
+      meta: { regularMarketPrice: 234.5, regularMarketTime: 1787947200 },
+      indicators: { quote: [{ close: [233.4, 234.5] }] },
+    }],
+  },
+});
 
 const ok = (body) => async () => ({ ok: true, status: 200, text: async () => body });
 
@@ -36,6 +45,11 @@ describe('parsing a quote', () => {
 
   test('the url is built from the ticker, lowercased', () => {
     assert.match(stooq.url('DELL'), /s=dell\.us/);
+  });
+
+  test('reads a Yahoo chart response', () => {
+    const q = yahoo.parse(YAHOO, 'AAPL');
+    assert.equal(q.price, 234.5);
   });
 });
 

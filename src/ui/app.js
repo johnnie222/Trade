@@ -13,7 +13,7 @@ import { Repository } from '../data/repo.js';
 import { autoBackup } from '../data/browserBackup.js';
 import * as E from '../core/events.js';
 import { tradeSummary } from '../core/metrics.js';
-import { resolveRule } from '../core/stopRules.js';
+import { resolveRule, withTradeTrailing } from '../core/stopRules.js';
 import { updatePrices, shouldAutoUpdate, summarize } from '../data/marketData.js';
 
 import { renderHome } from './screens/home.js';
@@ -35,8 +35,6 @@ export const state = {
     defaultRule: 'ladderClassic',
     theme: 'system',
     autoPrices: true,
-    trailType: 'TRAIL_PCT',
-    trailValue: 8,
   },
   /** { running, done, total, ticker } while the price queue is working. */
   priceSync: null,
@@ -50,6 +48,8 @@ export const state = {
    * `price:TICKER` and are replaced, never appended.
    */
   prices: {},
+  highs: {},
+  priceSheet: null,
   toast: null,
   draft: {},
 };
@@ -70,6 +70,7 @@ export async function boot() {
   state.repo = new Repository(store);
 
   await loadSettings();
+  loadPriceSheetDraft();
   await refresh();
   applyTheme();
 
@@ -86,12 +87,13 @@ export async function boot() {
 }
 
 async function loadSettings() {
-  const keys = ['equity', 'riskPct', 'defaultRule', 'theme', 'autoPrices', 'trailType', 'trailValue'];
+  const keys = ['equity', 'riskPct', 'defaultRule', 'theme', 'autoPrices'];
   for (const k of keys) {
     const v = await state.repo.getSetting(k, state.settings[k]);
     if (v != null) state.settings[k] = v;
   }
   state.prices = (await state.repo.getSetting('prices', {})) ?? {};
+  state.highs = (await state.repo.getSetting('priceHighs', {})) ?? {};
 }
 
 export async function refresh() {
@@ -126,7 +128,11 @@ export const openTrades = () => state.trades.filter((t) => t.status === 'OPEN');
 export const closedTrades = () => state.trades.filter((t) => t.status === 'CLOSED');
 export const summaries = () => state.trades.map((t) => tradeSummary(t));
 export const priceFor = (ticker) => state.prices[ticker] ?? null;
-export const rule = (key) => resolveRule(key, state.settings);
+export const rule = (tradeOrKey) => {
+  const trade = typeof tradeOrKey === 'object' ? tradeOrKey : null;
+  const base = resolveRule(trade?.rule ?? tradeOrKey, state.settings);
+  return trade?.managementMode === 'trailing' ? withTradeTrailing(base, trade) : base;
+};
 
 /* ------------------------------------------------------------------ */
 /* Actions                                                             */
@@ -154,7 +160,67 @@ export async function setSetting(key, value) {
 
 export async function setPrice(ticker, value, source = 'manual') {
   state.prices[ticker] = { price: value, at: new Date().toISOString(), source };
+  for (const trade of openTrades().filter((t) => t.ticker === ticker)) {
+    state.highs[trade.id] = Math.max(state.highs[trade.id] ?? trade.entryPrice, value);
+  }
   await state.repo.setSetting('prices', state.prices);
+  await state.repo.setSetting('priceHighs', state.highs);
+}
+
+const PRICE_DRAFT_KEY = 'trade-journal:price-sheet';
+
+function loadPriceSheetDraft() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(PRICE_DRAFT_KEY) ?? 'null');
+    if (saved?.open && Array.isArray(saved.tickers)) state.priceSheet = saved;
+  } catch {
+    localStorage.removeItem(PRICE_DRAFT_KEY);
+  }
+}
+
+function persistPriceSheet() {
+  if (state.priceSheet) localStorage.setItem(PRICE_DRAFT_KEY, JSON.stringify(state.priceSheet));
+  else localStorage.removeItem(PRICE_DRAFT_KEY);
+}
+
+export function openPriceSheet(tickers = null) {
+  const list = tickers?.length ? tickers : [...new Set(openTrades().map((t) => t.ticker))];
+  const saved = state.priceSheet?.values ?? {};
+  state.priceSheet = {
+    open: true,
+    tickers: list,
+    values: Object.fromEntries(list.map((ticker) => [ticker, saved[ticker] ?? state.prices[ticker]?.price ?? ''])),
+  };
+  persistPriceSheet();
+  render();
+}
+
+function priceSheet() {
+  if (!state.priceSheet?.open) return '';
+  return `<div class="sheet-backdrop">
+    <section class="bottom-sheet" role="dialog" aria-modal="true" aria-labelledby="price-sheet-title">
+      <div class="sheet-handle"></div>
+      <div class="card-head">
+        <div>
+          <span class="label">Manual fallback</span>
+          <h2 id="price-sheet-title">Update prices</h2>
+        </div>
+        <button class="chip" data-action="closePriceSheet" aria-label="Close">✕</button>
+      </div>
+      <p class="muted sheet-copy">Values are saved while you type. You can switch to another app and come back.</p>
+      <div class="price-grid">
+        ${state.priceSheet.tickers
+          .map((ticker) => `<label class="price-row">
+            <span class="ticker">${ticker}</span>
+            <input inputmode="decimal" data-price-input="${ticker}" value="${state.priceSheet.values[ticker] ?? ''}"
+                   placeholder="Last price">
+            <span class="muted">Previous ${state.prices[ticker]?.price ?? '—'}</span>
+          </label>`)
+          .join('')}
+      </div>
+      <button class="btn primary sheet-save" data-action="savePriceSheet">Save prices</button>
+    </section>
+  </div>`;
 }
 
 export async function createTrade(meta, openEvent) {
@@ -223,6 +289,7 @@ export function render() {
     </header>
     <main class="screen">${screen.render(state)}</main>
     ${tabs()}
+    ${priceSheet()}
     ${state.toast ? `<div class="toast" role="status">${state.toast}</div>` : ''}
   `;
   app.querySelector('.screen')?.scrollTo?.(0, 0);
@@ -267,11 +334,37 @@ document.addEventListener('click', (e) => {
 });
 
 document.addEventListener('input', (e) => {
+  const priceInput = e.target.closest?.('[data-price-input]');
+  if (priceInput && state.priceSheet) {
+    state.priceSheet.values[priceInput.dataset.priceInput] = priceInput.value;
+    persistPriceSheet();
+  }
   const el = e.target.closest('[data-live]');
   if (el) LIVE[el.dataset.live]?.(el);
 });
 
 export { ACTIONS, LIVE };
+
+ACTIONS.openPriceSheet = (el) => openPriceSheet(el.dataset.ticker ? [el.dataset.ticker] : null);
+ACTIONS.closePriceSheet = () => {
+  state.priceSheet = null;
+  persistPriceSheet();
+  render();
+};
+ACTIONS.savePriceSheet = async () => {
+  if (!state.priceSheet) return;
+  let saved = 0;
+  for (const ticker of state.priceSheet.tickers) {
+    const value = Number.parseFloat(state.priceSheet.values[ticker]);
+    if (Number.isFinite(value) && value > 0) {
+      await setPrice(ticker, value, 'manual');
+      saved += 1;
+    }
+  }
+  state.priceSheet = null;
+  persistPriceSheet();
+  toast(saved ? `Saved ${saved} price${saved === 1 ? '' : 's'}` : 'No prices entered');
+};
 
 /* ------------------------------------------------------------------ */
 /* Price sync                                                          */
@@ -312,14 +405,21 @@ export async function syncPrices({ auto = false } = {}) {
     state.prices[q.ticker] = {
       price: q.price,
       at: new Date().toISOString(),
-      source: q.date ? `close ${q.date}` : 'auto',
+      source: `${q.provider === 'yahoo' ? 'Yahoo' : 'Stooq'}${q.date ? ` · ${q.date}` : ''}`,
     };
+    for (const trade of openTrades().filter((t) => t.ticker === q.ticker)) {
+      state.highs[trade.id] = Math.max(state.highs[trade.id] ?? trade.entryPrice, q.price);
+    }
   }
-  if (results.updated.length) await state.repo.setSetting('prices', state.prices);
+  if (results.updated.length) {
+    await state.repo.setSetting('prices', state.prices);
+    await state.repo.setSetting('priceHighs', state.highs);
+  }
   await state.repo.setSetting('lastPriceSync', new Date().toISOString());
 
   state.priceSync = null;
   if (auto) render();
+  else if (results.failed.length) openPriceSheet(results.failed.map((x) => x.ticker));
   else toast(summarize(results));
   return results;
 }

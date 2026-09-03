@@ -99,7 +99,11 @@ html, body {
 }
 
 body {
-  background: var(--bg);
+  background:
+    radial-gradient(circle at 12% -8%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 34rem),
+    radial-gradient(circle at 92% 18%, color-mix(in srgb, var(--pos) 8%, transparent), transparent 28rem),
+    var(--bg);
+  background-attachment: fixed;
   color: var(--text);
   font-family: var(--sans);
   font-size: var(--step-0);
@@ -239,7 +243,9 @@ body.scrolled .topbar { border-bottom-color: var(--border); }
    -------------------------------------------------------------------------- */
 
 .card {
-  background: var(--surface);
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  backdrop-filter: saturate(125%) blur(14px);
+  -webkit-backdrop-filter: saturate(125%) blur(14px);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: var(--sp-4);
@@ -271,6 +277,13 @@ body.scrolled .topbar { border-bottom-color: var(--border); }
 }
 
 .hero { background: linear-gradient(180deg, var(--surface), var(--surface-2)); }
+
+.management-card {
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--accent) 8%, transparent), transparent 58%),
+    color-mix(in srgb, var(--surface) 90%, transparent);
+}
+.management-card h3, .bottom-sheet h2 { margin: var(--sp-1) 0 var(--sp-2); }
 
 .hero-split {
   display: grid;
@@ -721,6 +734,64 @@ dialog {
   width: min(420px, calc(100vw - 32px));
 }
 dialog::backdrop { background: rgb(0 0 0 / 0.45); }
+
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: rgb(5 8 12 / 0.54);
+  backdrop-filter: blur(5px);
+  -webkit-backdrop-filter: blur(5px);
+}
+
+.bottom-sheet {
+  width: min(560px, 100%);
+  max-height: min(82dvh, 720px);
+  overflow: auto;
+  padding: var(--sp-3) var(--sp-4) calc(var(--sp-5) + env(safe-area-inset-bottom));
+  border: 1px solid var(--border-strong);
+  border-bottom: 0;
+  border-radius: 20px 20px 0 0;
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--accent) 10%, transparent), transparent 44%),
+    color-mix(in srgb, var(--surface) 94%, transparent);
+  box-shadow: 0 -16px 60px rgb(0 0 0 / 0.24);
+  backdrop-filter: saturate(150%) blur(24px);
+  -webkit-backdrop-filter: saturate(150%) blur(24px);
+  animation: sheet-up 220ms var(--ease);
+}
+
+.sheet-handle {
+  width: 38px;
+  height: 4px;
+  border-radius: 99px;
+  background: var(--border-strong);
+  margin: 0 auto var(--sp-4);
+}
+
+.sheet-copy { margin: 0 0 var(--sp-4); }
+.price-grid { display: grid; gap: var(--sp-2); }
+.price-row {
+  display: grid;
+  grid-template-columns: 72px minmax(110px, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--surface-2) 72%, transparent);
+}
+.price-row input { text-align: right; }
+.price-row .muted { font-size: 11px; white-space: nowrap; }
+.sheet-save { width: 100%; margin-top: var(--sp-4); }
+
+@keyframes sheet-up {
+  from { opacity: 0; transform: translateY(24px); }
+  to { opacity: 1; transform: none; }
+}
 
 @media (min-width: 720px) {
   .screen { padding: var(--sp-5); }

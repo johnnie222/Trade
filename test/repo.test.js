@@ -251,6 +251,33 @@ describe('activity log enrichment', () => {
 });
 
 describe('trade metadata', () => {
+  test('a broker trailing plan is stored per trade', async () => {
+    const t = await openDell();
+    await repo.setManagementPlan(t.id, {
+      managementMode: 'trailing',
+      trailType: 'TRAIL_PCT',
+      trailValue: 8,
+    });
+    const saved = await repo.getTrade(t.id);
+    assert.equal(saved.managementMode, 'trailing');
+    assert.equal(saved.trailType, 'TRAIL_PCT');
+    assert.equal(saved.trailValue, 8);
+  });
+
+  test('switching back to manual clears the trail', async () => {
+    const t = await openDell();
+    await repo.setManagementPlan(t.id, {
+      managementMode: 'trailing',
+      trailType: 'TRAIL_USD',
+      trailValue: 7,
+    });
+    await repo.setManagementPlan(t.id, { managementMode: 'manual' });
+    const saved = await repo.getTrade(t.id);
+    assert.equal(saved.managementMode, 'manual');
+    assert.equal(saved.trailType, null);
+    assert.equal(saved.trailValue, null);
+  });
+
   test('the stop rule survives a round trip through storage', async () => {
     const t = await repo.createTrade(
       { ticker: 'DELL', rule: 'ladderClassic' },

@@ -171,6 +171,17 @@ describe('every screen renders with data', () => {
     assert.match(html, /Base breakout/);
   });
 
+  test('a trade past 3R offers manual or broker trailing management', () => {
+    const trade = state.trades.find((t) => t.ticker === 'DELL');
+    state.route = { name: 'trade', params: { id: trade.id } };
+    state.prices.DELL = { price: 116, at: D(8), source: 'manual' };
+    state.highs = { [trade.id]: 116 };
+    const html = renders(renderTradeDetail(state));
+    assert.match(html, /After 3R/);
+    assert.match(html, /Manual management/);
+    assert.match(html, /Set trailing/);
+  });
+
   test('trade detail, closed', () => {
     state.route = { name: 'trade', params: { id: state.trades.find((t) => t.ticker === 'JPM').id } };
     const html = renders(renderTradeDetail(state));
@@ -195,8 +206,7 @@ describe('every screen renders with data', () => {
     const html = renders(renderSettings(state));
     assert.match(html, /Backup/);
     assert.match(html, /50000/);
-    assert.match(html, /Trailing stop/);
-    assert.match(html, /then trail 8%/, 'the configured value is shown, not a placeholder');
+    assert.ok(!html.includes('Trailing stop'), 'trailing configuration belongs to each trade');
     assert.match(html, /Fetch prices when the app opens/);
   });
 

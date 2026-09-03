@@ -18,7 +18,7 @@ Full product spec: `spec.md` · Setup and deployment: `SETUP.md`
 - [x] All seven screens, PWA shell, offline service worker
 - [x] Review export (Markdown), trades CSV, events CSV, JSON
 - [x] EOD price fetch on open, with a queue and manual fallback
-- [x] Ladder rules that hand off to a trailing stop
+- [x] Per-trade choice after 3R: manual management or a broker-style % / $ trailing stop
 - [ ] Daily bars for MFE / MAE and the rule counterfactual (Phase 2)
 - [ ] Screenshots and Android share target (Phase 2)
 - [ ] Hebrew / RTL (Phase 2)
@@ -103,11 +103,11 @@ The split case is the interesting one: a 2:1 split halves `riskPerShare` and dou
 
 **Comparison arrows are withheld below five trades a side.** The delta is always reported; the claim that it means something is not.
 
-**A ladder alone stops managing the trade past its last rung.** That is correct if you intend to handle the tail by hand and wrong if you do not, since the biggest winners spend most of their life past the last rung. `then` hands the ladder off to a trailing rule once the final rung clears, and the two are evaluated together with the higher winning — so the handoff can never lower a stop the ladder already earned.
+**The standard ladder stops making automatic decisions after 3R.** It protects breakeven at 1R, 1R at 2R, and a 2R floor at 3R. From there each trade chooses manual management or a broker-style percentage / dollar trail. The trail and the 2R floor are evaluated together, so it can never give back protection already earned.
 
-**Trail values live in Settings, not in the presets.** "Trail 8%" is a shape; whether 8 is right is the trader's decision. Hard-coding it would hand every trader the author's guess.
+**Trail values live on the trade, not in Settings.** They describe a broker order for that position and can differ from one trade to the next.
 
-**Price fetching fails soft, always.** A browser can only read a response the server allows it to, and most free quote endpoints do not send the header that permits it. Every failure falls through to the last known price and then to typing one — and `Settings → Test the price source` answers the CORS question on the real device in one tap, since no amount of documentation can.
+**Price fetching fails soft, always.** The app tries two public end-of-day sources. If neither is available on the device or network, it silently opens the durable manual price sheet. The draft remains available when switching apps or reloading.
 
 **Prices are not events.** The log records decisions the trader made; a quote is an observation about the market. Mixing them would put a row in the trade timeline every time a price refreshed. Prices live in settings under `price:TICKER` and are replaced, never appended — which is also why swapping manual entry for an EOD feed in Phase 2 touches nothing else.
 

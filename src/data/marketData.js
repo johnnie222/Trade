@@ -51,27 +51,67 @@ export const stooq = {
   },
 };
 
-export const PROVIDERS = { stooq };
+export const yahoo = {
+  id: 'yahoo',
+  label: 'Yahoo Finance',
+  url: (ticker) =>
+    `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
+      ticker.toUpperCase()
+    )}?interval=1d&range=5d`,
+
+  parse(text, ticker) {
+    let payload;
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      throw new ProviderError(`No data for ${ticker}`);
+    }
+    const result = payload?.chart?.result?.[0];
+    const meta = result?.meta;
+    const closes = result?.indicators?.quote?.[0]?.close ?? [];
+    const price = Number(meta?.regularMarketPrice ?? [...closes].reverse().find(Number.isFinite));
+    if (!Number.isFinite(price) || price <= 0) throw new ProviderError(`${ticker} not found`);
+    const stamp = meta?.regularMarketTime;
+    return {
+      price,
+      date: stamp ? new Date(stamp * 1000).toISOString().slice(0, 10) : null,
+      open: Number(meta?.regularMarketOpen) || null,
+      high: Number(meta?.regularMarketDayHigh) || null,
+      low: Number(meta?.regularMarketDayLow) || null,
+      volume: Number(meta?.regularMarketVolume) || null,
+    };
+  },
+};
+
+export const PROVIDERS = { stooq, yahoo };
+export const DEFAULT_PROVIDERS = [stooq, yahoo];
 
 /**
  * @param {string} ticker
  * @param {object} [opts] { provider, fetchImpl, timeoutMs }
  */
-export async function fetchQuote(ticker, { provider = stooq, fetchImpl = globalThis.fetch, timeoutMs = 8000 } = {}) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const res = await fetchImpl(provider.url(ticker), { signal: controller.signal });
-    if (!res.ok) throw new ProviderError(`${provider.label} returned ${res.status}`);
-    return provider.parse(await res.text(), ticker);
-  } catch (err) {
-    if (err instanceof ProviderError) throw err;
-    if (err.name === 'AbortError') throw new ProviderError('Timed out');
-    // A CORS rejection surfaces as an opaque TypeError with no useful detail.
-    throw new ProviderError('Could not reach the price source from the browser');
-  } finally {
-    clearTimeout(timer);
+export async function fetchQuote(
+  ticker,
+  { provider = null, providers = DEFAULT_PROVIDERS, fetchImpl = globalThis.fetch, timeoutMs = 8000 } = {}
+) {
+  const attempts = provider ? [provider] : providers;
+  let lastError = null;
+  for (const source of attempts) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetchImpl(source.url(ticker), { signal: controller.signal });
+      if (!res.ok) throw new ProviderError(`${source.label} returned ${res.status}`);
+      return { ...source.parse(await res.text(), ticker), provider: source.id };
+    } catch (err) {
+      if (err?.name === 'AbortError') lastError = new ProviderError('Timed out');
+      else if (err instanceof ProviderError) lastError = err;
+      else lastError = new ProviderError('Could not reach the price source from the browser');
+    } finally {
+      clearTimeout(timer);
+    }
   }
+  throw lastError ?? new ProviderError('Could not reach the price source from the browser');
 }
 
 /* ------------------------------------------------------------------ */

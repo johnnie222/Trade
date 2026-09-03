@@ -210,16 +210,6 @@ export function renderHome(s) {
  * the trader to find the manual path on their own.
  */
 ACTIONS.syncPrices = async () => {
-  const { syncPrices, setPrice, render } = await import('../app.js');
-  const results = await syncPrices({ auto: false });
-  if (!results) return;
-
-  for (const { ticker } of results.failed) {
-    const current = priceFor(ticker)?.price ?? '';
-    const input = window.prompt(`Last price for ${ticker}`, current);
-    if (input == null) break;
-    const value = Number.parseFloat(input);
-    if (Number.isFinite(value) && value > 0) await setPrice(ticker, value, 'manual');
-  }
-  render();
+  const { syncPrices } = await import('../app.js');
+  await syncPrices({ auto: false });
 };
