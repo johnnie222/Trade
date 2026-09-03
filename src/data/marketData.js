@@ -36,13 +36,23 @@ export function setTwelveDataKey(value, storage = globalThis.localStorage) {
   return key;
 }
 
+const finite = (v) => {
+  const n = Number.parseFloat(v);
+  return Number.isFinite(n) ? n : null;
+};
+
+/**
+ * Twelve Data /quote costs the same credit as /price, but gives the previous
+ * close and daily context as well. prepost is intentionally NOT requested: the
+ * journal displays regular-session prices even while the clock says pre/after.
+ */
 export function twelveData(apiKey) {
   const key = String(apiKey ?? '').trim();
   return {
     id: 'twelve',
     label: 'Twelve Data',
     url: (ticker) =>
-      `https://api.twelvedata.com/price?symbol=${encodeURIComponent(ticker.toUpperCase())}&apikey=${encodeURIComponent(key)}`,
+      `https://api.twelvedata.com/quote?symbol=${encodeURIComponent(ticker.toUpperCase())}&apikey=${encodeURIComponent(key)}`,
     parse(text, ticker) {
       let payload;
       try {
@@ -51,11 +61,61 @@ export function twelveData(apiKey) {
         throw new ProviderError(`No data for ${ticker}`);
       }
       if (payload?.status === 'error') throw new ProviderError(payload.message || `No data for ${ticker}`);
-      const price = Number.parseFloat(payload?.price);
-      if (!Number.isFinite(price) || price <= 0) throw new ProviderError(`${ticker} not found`);
-      return { price, date: null, open: null, high: null, low: null, volume: null };
+
+      const price = finite(payload?.close ?? payload?.price);
+      if (!(price > 0)) throw new ProviderError(`${ticker} not found`);
+      const previousClose = finite(payload?.previous_close);
+      const change = finite(payload?.change) ?? (previousClose != null ? price - previousClose : null);
+      const pctFromProvider = finite(payload?.percent_change);
+      const dailyPercent =
+        pctFromProvider != null ? pctFromProvider / 100 : previousClose ? (price - previousClose) / previousClose : null;
+
+      return {
+        price,
+        previousClose,
+        change,
+        dailyPercent,
+        date: payload?.datetime?.slice?.(0, 10) ?? null,
+        datetime: payload?.datetime ?? null,
+        timestamp: finite(payload?.timestamp),
+        name: payload?.name ?? null,
+        exchange: payload?.exchange ?? null,
+        open: finite(payload?.open),
+        high: finite(payload?.high),
+        low: finite(payload?.low),
+        volume: finite(payload?.volume),
+        averageVolume: finite(payload?.average_volume),
+        isMarketOpen: typeof payload?.is_market_open === 'boolean' ? payload.is_market_open : null,
+        fiftyTwoWeek: payload?.fifty_two_week ?? null,
+      };
     },
   };
+}
+
+/** A company logo is metadata, fetched once and cached by the app. */
+export async function fetchLogo(
+  ticker,
+  { apiKey = getTwelveDataKey(), fetchImpl = globalThis.fetch, timeoutMs = 8000 } = {}
+) {
+  const key = String(apiKey ?? '').trim();
+  if (!key) return null;
+  const symbol = String(ticker ?? '').trim().toUpperCase();
+  if (!symbol) return null;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const url = `https://api.twelvedata.com/logo?symbol=${encodeURIComponent(symbol)}&apikey=${encodeURIComponent(key)}`;
+    const res = await fetchImpl(url, { signal: controller.signal });
+    if (!res.ok) return null;
+    const payload = JSON.parse(await res.text());
+    if (payload?.status === 'error') return null;
+    return typeof payload?.url === 'string' && payload.url ? payload.url : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** Kept as an explicit provider for tests / emergency fallback experiments. */
@@ -75,6 +135,9 @@ export const stooq = {
     if (!Number.isFinite(close) || close <= 0) throw new ProviderError(`${ticker} not found`);
     return {
       price: close,
+      previousClose: null,
+      change: null,
+      dailyPercent: null,
       date: row.date ?? null,
       open: Number.parseFloat(row.open) || null,
       high: Number.parseFloat(row.high) || null,
@@ -84,13 +147,18 @@ export const stooq = {
   },
 };
 
+/**
+ * Yahoo remains a fallback, but regularMarketPrice is used deliberately. Do not
+ * substitute preMarketPrice/postMarketPrice: the user asked the journal not to
+ * surface extended-hours prices.
+ */
 export const yahoo = {
   id: 'yahoo',
   label: 'Yahoo Finance',
   url: (ticker) =>
     `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
       ticker.toUpperCase()
-    )}?interval=1m&range=1d&includePrePost=true`,
+    )}?interval=1d&range=5d`,
 
   parse(text, ticker) {
     let payload;
@@ -102,24 +170,27 @@ export const yahoo = {
     const result = payload?.chart?.result?.[0];
     const meta = result?.meta;
     const closes = result?.indicators?.quote?.[0]?.close ?? [];
-    const marketState = String(meta?.marketState ?? '').toUpperCase();
-    const sessionPrice = marketState.includes('POST')
-      ? meta?.postMarketPrice
-      : marketState.includes('PRE')
-        ? meta?.preMarketPrice
-        : meta?.regularMarketPrice;
-    const price = Number(
-      sessionPrice ?? meta?.regularMarketPrice ?? meta?.postMarketPrice ?? meta?.preMarketPrice ?? [...closes].reverse().find(Number.isFinite)
-    );
+    const price = Number(meta?.regularMarketPrice ?? [...closes].reverse().find(Number.isFinite));
     if (!Number.isFinite(price) || price <= 0) throw new ProviderError(`${ticker} not found`);
+
+    const previousClose = finite(meta?.chartPreviousClose ?? meta?.regularMarketPreviousClose);
     const stamp = meta?.regularMarketTime ?? result?.timestamp?.at?.(-1);
     return {
       price,
+      previousClose,
+      change: previousClose != null ? price - previousClose : null,
+      dailyPercent: previousClose ? (price - previousClose) / previousClose : null,
       date: stamp ? new Date(stamp * 1000).toISOString().slice(0, 10) : null,
-      open: Number(meta?.regularMarketOpen) || null,
-      high: Number(meta?.regularMarketDayHigh) || null,
-      low: Number(meta?.regularMarketDayLow) || null,
-      volume: Number(meta?.regularMarketVolume) || null,
+      datetime: stamp ? new Date(stamp * 1000).toISOString() : null,
+      name: meta?.longName ?? meta?.shortName ?? null,
+      exchange: meta?.exchangeName ?? meta?.fullExchangeName ?? null,
+      open: finite(meta?.regularMarketOpen),
+      high: finite(meta?.regularMarketDayHigh),
+      low: finite(meta?.regularMarketDayLow),
+      volume: finite(meta?.regularMarketVolume),
+      averageVolume: null,
+      isMarketOpen: null,
+      fiftyTwoWeek: null,
     };
   },
 };
