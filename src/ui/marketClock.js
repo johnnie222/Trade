@@ -146,6 +146,10 @@ function nextOpen(now, d, mode) {
   return targetOn(nextTradingDate(d), openMinute);
 }
 
+function openCopy(mode, ms) {
+  return `${mode === 'extended' ? 'Extended session' : 'Regular market'} opens in ${duration(ms)}`;
+}
+
 export function marketStatus(now = new Date(), mode = 'regular') {
   const p = parts(now);
   const d = { year: p.year, month: p.month, day: p.day };
@@ -165,7 +169,7 @@ export function marketStatus(now = new Date(), mode = 'regular') {
       phase: 'pre',
       icon: '☀',
       label: 'Pre-market',
-      detail: mode === 'extended' ? `Regular in ${duration(regular - now)}` : `Opens in ${duration(regular - now)}`,
+      detail: mode === 'extended' ? `Regular market opens in ${duration(regular - now)}` : openCopy(mode, regular - now),
       open: mode === 'extended',
     };
   }
@@ -173,14 +177,14 @@ export function marketStatus(now = new Date(), mode = 'regular') {
   if (tradingDay && minute >= REGULAR_CLOSE && minute < EXTENDED_CLOSE) {
     if (mode === 'extended') {
       const close = targetOn(d, EXTENDED_CLOSE);
-      return { time, phase: 'after', icon: '☾', label: 'After-hours', detail: `Closes in ${duration(close - now)}`, open: true };
+      return { time, phase: 'after', icon: '☾', label: 'After-hours', detail: `Extended session closes in ${duration(close - now)}`, open: true };
     }
     const opening = nextOpen(now, d, mode);
-    return { time, phase: 'after', icon: '☾', label: 'After-hours', detail: `Opens in ${duration(opening - now)}`, open: false };
+    return { time, phase: 'after', icon: '☾', label: 'After-hours', detail: openCopy(mode, opening - now), open: false };
   }
 
   const opening = nextOpen(now, d, mode);
-  return { time, phase: 'closed', icon: '☾', label: 'Closed', detail: `Opens in ${duration(opening - now)}`, open: false };
+  return { time, phase: 'closed', icon: '☾', label: 'Closed', detail: openCopy(mode, opening - now), open: false };
 }
 
 export function marketStatusHtml(mode = 'regular', now = new Date()) {
