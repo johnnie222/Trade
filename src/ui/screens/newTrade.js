@@ -21,6 +21,9 @@ import { price as fmtPrice, dollars, rval, pct, esc } from '../format.js';
 
 const SETUPS = ['Breakout', 'Pullback', 'Support Bounce', 'Trend Continuation', 'Gap', 'Reversal', 'Base Breakout'];
 const EMOTIONS = ['Calm', 'Confident', 'FOMO', 'Unsure'];
+const ACTIVE_RULES = ['discretionary', 'ladderClassic'];
+
+const activeRule = (key) => (ACTIVE_RULES.includes(key) ? key : 'ladderClassic');
 
 const draft = () => (state.draft.new ??= {
   ticker: '',
@@ -29,7 +32,7 @@ const draft = () => (state.draft.new ??= {
   qty: '',
   setup: null,
   emotion: null,
-  rule: state.settings.defaultRule,
+  rule: activeRule(state.settings.defaultRule),
   thesis: '',
   invalidation: '',
 });
@@ -143,6 +146,7 @@ export function renderNewTrade(s) {
         <label class="label" for="f-rule">Stop rule</label>
         <select id="f-rule" data-live="new" data-k="rule">
           ${Object.entries(PRESETS)
+            .filter(([key]) => ACTIVE_RULES.includes(key))
             .map(([k, r]) => `<option value="${k}" ${d.rule === k ? 'selected' : ''}>${r.label}</option>`)
             .join('')}
         </select>

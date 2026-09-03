@@ -68,7 +68,7 @@ On iPhone: Safari → Share → **Add to Home Screen**.
 
 1. **Settings → Account size.** Everything risk-related reads from this one number.
 2. **Settings → Default risk per trade.** 1% is the default. It drives the suggested position size and is never enforced.
-3. **Settings → Default stop rule.** `1R→BE, 2R→1R, 3R→2R` is preselected. After a trade reaches 3R, choose manual management or configure a percentage / dollar broker trail on that trade.
+3. **Settings → Default stop rule.** Choose manual management or `1R→BE, 2R→1R, 3R→2R`. After a standard-plan trade reaches 3R, choose manual management or configure a percentage / dollar broker trail on that trade.
 4. **Settings → Choose folder** (Chrome only). Backups then write there silently instead of landing in Downloads.
 5. Add a trade. Ticker, entry, stop, shares — the risk, the R targets and the suggested size appear as you type.
 

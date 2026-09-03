@@ -12,6 +12,8 @@ import { serialize, restore } from '../../data/backup.js';
 import { autoBackup, chooseBackupFolder, hasFileSystemAccess } from '../../data/browserBackup.js';
 import { dollars, shortDate, esc } from '../format.js';
 
+const ACTIVE_RULES = ['discretionary', 'ladderClassic'];
+
 export function renderSettings(s) {
   const last = s.draft.lastBackup;
 
@@ -54,6 +56,7 @@ export function renderSettings(s) {
         <label class="label" for="s-rule">Default stop rule</label>
         <select id="s-rule" data-set="defaultRule">
           ${Object.entries(PRESETS)
+            .filter(([key]) => ACTIVE_RULES.includes(key))
             .map(
               ([k, r]) =>
                 `<option value="${k}" ${s.settings.defaultRule === k ? 'selected' : ''}>${r.label}</option>`
