@@ -1,18 +1,14 @@
 /**
- * Trades: the full history, open first.
+ * Trades: compact locator, not a second Today screen.
  *
- * Deliberately dense. This screen is for finding a trade, not studying one, so
- * each row carries the ticker, the move in percent, the result in R and in
- * dollars, and nothing else.
- *
- * Percent and R answer different questions and neither replaces the other. A
- * 3% move is a 2R win on a tight stop and a scratch on a wide one — percent
- * says what the stock did, R says what the decision was worth.
+ * No R and no calendar date here. The row answers four quick questions:
+ * stock move from the original buy, dollar result, active stop, and what is
+ * locked. Closed rows add duration under the ticker.
  */
 
-import { state, priceFor } from '../app.js';
-import { realizedR, currentR, totalPnl } from '../../core/engine.js';
-import { rval, dollars, tone, shortDate, esc } from '../format.js';
+import { priceFor } from '../app.js';
+import { totalPnl, lockedIn, isProtected } from '../../core/engine.js';
+import { dollars, price as fmtPrice, tone, daysBetween, esc } from '../format.js';
 
 function pctChange(t) {
   const to = t.status === 'OPEN' ? priceFor(t.ticker)?.price : t.exitPrice;
@@ -23,28 +19,29 @@ function pctChange(t) {
 function row(t) {
   const p = priceFor(t.ticker);
   const isOpen = t.status === 'OPEN';
-  const r = isOpen ? (p ? currentR(t, p.price) : null) : realizedR(t);
   const cash = isOpen ? (p ? totalPnl(t, p.price) : null) : t.realizedPnl;
   const chg = pctChange(t);
+  const locked = isOpen && isProtected(t) ? Math.max(0, lockedIn(t)) : null;
+  const duration = !isOpen ? daysBetween(t.openedAt, t.closedAt) : null;
 
   return `<tr data-go="trade/${t.id}" tabindex="0">
     <td>
       <span class="ticker sm">${esc(t.ticker)}</span>
-      <span class="row-sub">${esc(t.setup ?? 'Untagged')}</span>
+      ${duration != null ? `<span class="row-sub">${duration} day${duration === 1 ? '' : 's'}</span>` : ''}
     </td>
-    <td class="num ${tone(chg)}">${chg == null ? '&mdash;' : `${chg >= 0 ? '+' : ''}${(chg * 100).toFixed(2)}%`}</td>
-    <td>
-      <span class="r ${tone(r)}">${rval(r)}</span>
+    <td class="num ${tone(chg)}">
+      ${chg == null ? '&mdash;' : `${chg >= 0 ? '+' : ''}${(chg * 100).toFixed(2)}%`}
       <span class="row-sub ${tone(cash)}">${dollars(cash)}</span>
     </td>
-    <td class="muted">${shortDate(t.closedAt ?? t.openedAt)}</td>
+    <td class="num">${fmtPrice(t.activeStop)}</td>
+    <td class="num ${tone(locked)}">${locked == null ? '&mdash;' : dollars(locked)}</td>
   </tr>`;
 }
 
 function table(rows) {
-  return `<div class="card pad-0">
+  return `<div class="card pad-0 trades-compact">
     <table class="rows">
-      <thead><tr><th>Trade</th><th>Move</th><th>Result</th><th>Date</th></tr></thead>
+      <thead><tr><th>Trade</th><th>Change</th><th>Stop</th><th>Locked</th></tr></thead>
       <tbody>${rows.map(row).join('')}</tbody>
     </table>
   </div>`;
