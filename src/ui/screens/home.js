@@ -1,13 +1,9 @@
 /**
- * Home.
+ * Today: portfolio state first, then the open trades.
  *
- * Answers one question: what needs attention right now. Account risk first
- * because it is the only number here that is not about a single trade, then the
- * positions, then what happened lately.
- *
- * Every R figure is shown with its dollar value beside it. R is what makes
- * trades comparable; dollars are what the account actually feels. Showing one
- * without the other makes the trader do arithmetic the app already knows.
+ * The screen is intentionally operational rather than analytical: market
+ * context, what is still at risk, what is already protected, and the current
+ * state of each trade in its own R terms.
  */
 
 import { ACTIONS } from '../registry.js';
@@ -15,19 +11,17 @@ import { state, openTrades, priceFor, rule } from '../app.js';
 import { portfolioRisk, currentR, totalPnl, tradeStatusLabel, isProtected, openRisk, lockedIn } from '../../core/engine.js';
 import { evaluateStopRule } from '../../core/stopRules.js';
 import { priceAge } from '../../data/marketData.js';
+import { marketStatusHtml } from '../marketClock.js';
 import { rail, rval, dollars, price as fmtPrice, pct, tone, shortDate, daysBetween, esc } from '../format.js';
 
 function ruleFlag(t) {
   const p = priceFor(t.ticker);
   if (!p || !t.rule || t.rule === 'discretionary') return null;
-  // Without daily bars the last known price stands in for the highest close.
-  // Understating the high can only make a rule quieter, never noisier, which
-  // is the right direction to be wrong in.
-  const r = evaluateStopRule(rule(t.rule), {
+  const r = evaluateStopRule(rule(t), {
     entryPrice: t.entryPrice,
     riskPerShare: t.riskPerShare,
     activeStop: t.activeStop,
-    highestClose: p.price,
+    highestClose: state.highs[t.id] ?? p.price,
     currentPrice: p.price,
   });
   return r.shouldRaise ? r : null;
@@ -132,6 +126,7 @@ export function renderHome(s) {
 
   if (!s.trades.length) {
     return `
+      ${marketStatusHtml(s.settings.marketHours)}
       <div class="empty-state">
         <p class="empty-title">Nothing recorded yet</p>
         <p class="muted">Add a trade and the risk, the R targets and the review all follow from it.</p>
@@ -143,26 +138,31 @@ export function renderHome(s) {
     const p = priceFor(t.ticker);
     return a + (p ? totalPnl(t, p.price) : 0);
   }, 0);
+  const locked = open.reduce((a, t) => a + Math.max(0, lockedIn(t)), 0);
+  const protectedCount = open.filter(isProtected).length;
+  const atRiskCount = open.length - protectedCount;
 
   return `
-    <section class="card hero">
+    ${marketStatusHtml(s.settings.marketHours)}
+
+    <section class="card hero risk-hero">
       <div class="card-head">
-        <span class="label">At risk</span>
+        <span class="label">Portfolio risk</span>
         <span class="muted">${open.length} position${open.length === 1 ? '' : 's'}</span>
       </div>
-      <div class="headline">
+      <div class="headline risk-headline">
         <span class="num">${dollars(risk.total, { sign: false })}</span>
         <span class="headline-sub muted">${pct(risk.total / s.settings.equity, { dp: 2 })} of account</span>
       </div>
-      <div class="hero-split">
-        <div><span class="label">Open P&amp;L</span><span class="num r ${tone(unrealized)}">${dollars(
-          unrealized
-        )}</span></div>
-        <div><span class="label">Largest</span><span class="num">${dollars(risk.largest, {
-          sign: false,
-        })}</span></div>
+      <div class="hero-split hero-split-3">
+        <div><span class="label">Open gain/loss</span><span class="num r ${tone(unrealized)}">${dollars(unrealized)}</span></div>
+        <div><span class="label">Locked in</span><span class="num r ${tone(locked)}">${dollars(locked)}</span></div>
+        <div><span class="label">Positions</span><span class="num">${open.length}</span></div>
       </div>
-      <p class="fineprint">Assumes every stop fills at its price. A gap does not.</p>
+      <div class="risk-state">
+        <span>${atRiskCount} at risk</span><span class="risk-dot">·</span><span class="pos">${protectedCount} protected</span>
+      </div>
+      <p class="fineprint">Assumes every stop fills at its price. Gaps can exceed the stated risk.</p>
     </section>
 
     ${syncBar(s.priceSync)}
@@ -201,15 +201,7 @@ export function renderHome(s) {
     </div>`;
 }
 
-/**
- * Fetch first, ask second.
- *
- * If the feed works this is one tap and nothing is typed. If it does not — and
- * whether it does depends on CORS headers nobody here controls — it falls
- * straight through to typing them, rather than reporting a failure and leaving
- * the trader to find the manual path on their own.
- */
 ACTIONS.syncPrices = async () => {
   const { syncPrices } = await import('../app.js');
-  await syncPrices({ auto: false });
+  await syncPrices({ manualFallback: true, showProgress: true });
 };
