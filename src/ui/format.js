@@ -1,11 +1,4 @@
-/**
- * Display formatting.
- *
- * Every function here returns an em dash for a missing value rather than a
- * zero. The statistics layer is careful to return null where a number does not
- * exist, and rendering that null as "0.00" would throw the honesty away at the
- * last step.
- */
+/** Display formatting shared by every screen. */
 
 export const DASH = '—';
 
@@ -27,7 +20,6 @@ export function dollars(x, { sign = true } = {}) {
 
 export function price(x) {
   if (x == null || !Number.isFinite(x)) return DASH;
-  // Sub-dollar names need more places; anything else reads better without them.
   return x < 10 ? x.toFixed(3).replace(/0$/, '') : x.toFixed(2);
 }
 
@@ -46,7 +38,6 @@ export function num(x, dp = 2) {
   return x.toFixed(dp);
 }
 
-/** Class name for a signed value. Neutral at zero rather than green. */
 export function tone(x) {
   if (x == null || !Number.isFinite(x) || x === 0) return '';
   return x > 0 ? 'pos' : 'neg';
@@ -76,55 +67,45 @@ export function daysBetween(a, b = new Date()) {
 /* ------------------------------------------------------------------ */
 
 /**
- * A proportional axis from the stop to a little past 2R, with the entry, the
- * milestones and the current price placed by true position.
- *
- * The scale deliberately extends past 2R rather than ending at the current
- * price, so that a trade at +0.3R and a trade at +1.9R do not both render as a
- * bar most of the way across. The rail's job is to show where a trade sits in
- * its own risk terms at a glance; rescaling to fit the marker would destroy
- * exactly that.
+ * Minimal capsule rail. Stop is intentionally not drawn here: it already has
+ * a dedicated field in the card and adding it to the rail made the compact
+ * view read like a technical axis. The rail's single job is progress through
+ * Entry -> 1R -> 2R, with a current-price marker.
  */
-export function rail({ entry, stop, activeStop, current, riskPerShare }) {
-  if (![entry, stop, riskPerShare].every(Number.isFinite) || riskPerShare <= 0) return '';
+export function rail({ entry, current, riskPerShare }) {
+  if (![entry, riskPerShare].every(Number.isFinite) || riskPerShare <= 0) return '';
 
-  const lo = Math.min(stop, activeStop ?? stop, current ?? entry) - riskPerShare * 0.15;
-  const hiCandidates = [entry + riskPerShare * 2.2, current ?? entry, activeStop ?? stop];
-  const hi = Math.max(...hiCandidates) + riskPerShare * 0.15;
-  const span = hi - lo;
-  if (!(span > 0)) return '';
+  const nowR = Number.isFinite(current) ? (current - entry) / riskPerShare : null;
+  const minR = Math.min(-0.35, nowR == null ? 0 : nowR - 0.12);
+  const maxR = Math.max(2.35, nowR == null ? 2.35 : nowR + 0.18);
+  const span = maxR - minR;
+  const atR = (r) => `${(((r - minR) / span) * 100).toFixed(2)}%`;
 
-  const at = (v) => `${(((v - lo) / span) * 100).toFixed(2)}%`;
-  const inRange = (v) => Number.isFinite(v) && v >= lo && v <= hi;
-
-  const marks = [
-    { v: activeStop ?? stop, cls: 'stop', text: 'stop' },
-    { v: entry, cls: 'entry', text: 'entry' },
-    { v: entry + riskPerShare, cls: '', text: '1R' },
-    { v: entry + riskPerShare * 2, cls: '', text: '2R' },
-  ].filter((m) => inRange(m.v));
-
-  const now = Number.isFinite(current) ? current : null;
-  const fillFrom = now != null ? Math.min(entry, now) : entry;
-  const fillTo = now != null ? Math.max(entry, now) : entry;
-  const fillTone = now == null ? '' : now > entry ? 'pos' : now < entry ? 'neg' : '';
+  const fillFromR = nowR == null ? 0 : Math.min(0, nowR);
+  const fillToR = nowR == null ? 0 : Math.max(0, nowR);
+  const fillTone = nowR == null ? '' : nowR > 0 ? 'pos' : nowR < 0 ? 'neg' : '';
+  const milestones = [
+    { r: 0, text: 'entry', cls: 'entry' },
+    { r: 1, text: '1R', cls: '' },
+    { r: 2, text: '2R', cls: '' },
+  ];
 
   return `
-    <div class="rail" role="img" aria-label="Position from stop to 2R">
+    <div class="rail" role="img" aria-label="${nowR == null ? 'R progress' : `Current position ${nowR.toFixed(2)} R`}">
       <div class="rail-track"></div>
       ${
-        now != null
-          ? `<div class="rail-fill ${fillTone}" style="left:${at(fillFrom)};width:${(
-              ((fillTo - fillFrom) / span) * 100
+        nowR != null
+          ? `<div class="rail-fill ${fillTone}" style="left:${atR(fillFromR)};width:${(
+              ((fillToR - fillFromR) / span) * 100
             ).toFixed(2)}%"></div>`
           : ''
       }
-      ${marks
+      ${milestones
         .map(
-          (m) => `<div class="rail-tick ${m.cls}" style="left:${at(m.v)}"></div>
-                  <div class="rail-label" style="left:${at(m.v)}">${m.text}</div>`
+          (m) => `<div class="rail-dot ${m.cls}" style="left:${atR(m.r)}"></div>
+                  <div class="rail-label" style="left:${atR(m.r)}">${m.text}</div>`
         )
         .join('')}
-      ${now != null ? `<div class="rail-now" style="left:${at(now)}"></div>` : ''}
+      ${nowR != null ? `<div class="rail-now ${fillTone}" style="left:${atR(nowR)}"></div>` : ''}
     </div>`;
 }
