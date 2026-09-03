@@ -7,9 +7,10 @@
 
 import { ACTIONS } from '../registry.js';
 import { state, setSetting, applyTheme, render, toast, refresh } from '../app.js';
-import { PRESETS } from '../../core/stopRules.js';
+import { PRESETS, CONFIGURABLE, resolveRule, RuleType } from '../../core/stopRules.js';
 import { serialize, restore } from '../../data/backup.js';
 import { autoBackup, chooseBackupFolder, hasFileSystemAccess } from '../../data/browserBackup.js';
+import { fetchQuote } from '../../data/marketData.js';
 import { dollars, shortDate, esc } from '../format.js';
 
 export function renderSettings(s) {
@@ -66,6 +67,59 @@ export function renderSettings(s) {
       </p>
     </div>
 
+    <div class="section-title"><span class="label">Trailing stop</span></div>
+    <div class="card">
+      <p class="muted" style="margin:0 0 var(--sp-3);font-size:var(--step--1)">
+        Used by any rule that trails. A percentage suits most names; a fixed dollar amount
+        suits one you know well; R keeps the distance comparable across every ticker.
+      </p>
+      <div class="chips" style="margin-bottom:var(--sp-3)">
+        ${[
+          [RuleType.TRAIL_PCT, 'Percent'],
+          [RuleType.TRAIL_USD, 'Dollars'],
+          [RuleType.TRAIL_R, 'R'],
+        ]
+          .map(
+            ([v, label]) =>
+              `<button class="chip" data-action="setTrailType" data-v="${v}"
+                       aria-pressed="${s.settings.trailType === v}">${label}</button>`
+          )
+          .join('')}
+      </div>
+      <div class="field" style="margin-bottom:0">
+        <label class="label" for="s-trailv">
+          ${
+            s.settings.trailType === RuleType.TRAIL_PCT
+              ? 'Percent below the high'
+              : s.settings.trailType === RuleType.TRAIL_USD
+                ? 'Dollars below the high'
+                : 'R below the high'
+          }
+        </label>
+        <input id="s-trailv" inputmode="decimal" value="${s.settings.trailValue}" data-set="trailValue">
+      </div>
+      <p class="muted" style="margin:var(--sp-3) 0 0;font-size:var(--step--1)">
+        Currently: ${esc(resolveRule('ladderThenTrail', s.settings).label)}
+      </p>
+    </div>
+
+    <div class="section-title"><span class="label">Prices</span></div>
+    <div class="card">
+      <label class="switch">
+        <input type="checkbox" data-set="autoPrices" ${s.settings.autoPrices ? 'checked' : ''}>
+        <span>Fetch prices when the app opens</span>
+      </label>
+      <p class="muted" style="margin:var(--sp-3) 0 0;font-size:var(--step--1)">
+        End-of-day closes for open positions only, once per opening and at most every
+        30 minutes. It runs quietly and never blocks the screen. Whether a browser is
+        allowed to read the price source depends on headers we do not control, so test it
+        once here — if it fails, typing prices still works everywhere.
+      </p>
+      <div class="btn-row" style="margin-top:var(--sp-3)">
+        <button class="btn" data-action="testFeed">Test the price source</button>
+      </div>
+    </div>
+
     <div class="section-title"><span class="label">Appearance</span></div>
     <div class="card">
       <div class="chips">
@@ -100,8 +154,12 @@ document.addEventListener('change', async (e) => {
   const el = e.target.closest('[data-set]');
   if (!el) return;
   const key = el.dataset.set;
-  const value = ['equity', 'riskPct'].includes(key) ? Number.parseFloat(el.value) : el.value;
-  if (['equity', 'riskPct'].includes(key) && !Number.isFinite(value)) return;
+  const numeric = ['equity', 'riskPct', 'trailValue'];
+  let value;
+  if (el.type === 'checkbox') value = el.checked;
+  else if (numeric.includes(key)) value = Number.parseFloat(el.value);
+  else value = el.value;
+  if (numeric.includes(key) && !(Number.isFinite(value) && value > 0)) return;
   await setSetting(key, value);
   toast('Saved');
 });
@@ -180,4 +238,26 @@ ACTIONS.importJson = () => {
     }
   };
   input.click();
+};
+
+ACTIONS.setTrailType = async (el) => {
+  await setSetting('trailType', el.dataset.v);
+  render();
+};
+
+/**
+ * One tap that answers the only question this feature has.
+ *
+ * A price feed either is or is not readable from a browser, and no amount of
+ * documentation settles it for a given device and network. Testing a known
+ * symbol turns an unanswerable question into a yes or a no.
+ */
+ACTIONS.testFeed = async () => {
+  toast('Testing…');
+  try {
+    const quote = await fetchQuote('AAPL');
+    toast(`Working — AAPL ${quote.price}${quote.date ? ` (${quote.date})` : ''}`);
+  } catch (err) {
+    toast(`${err.message}. Prices will need typing.`);
+  }
 };

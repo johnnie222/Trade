@@ -13,7 +13,8 @@ import { Repository } from '../data/repo.js';
 import { autoBackup } from '../data/browserBackup.js';
 import * as E from '../core/events.js';
 import { tradeSummary } from '../core/metrics.js';
-import { PRESETS } from '../core/stopRules.js';
+import { resolveRule } from '../core/stopRules.js';
+import { updatePrices, shouldAutoUpdate, summarize } from '../data/marketData.js';
 
 import { renderHome } from './screens/home.js';
 import { renderNewTrade } from './screens/newTrade.js';
@@ -33,7 +34,12 @@ export const state = {
     riskPct: 1,
     defaultRule: 'ladderClassic',
     theme: 'system',
+    autoPrices: true,
+    trailType: 'TRAIL_PCT',
+    trailValue: 8,
   },
+  /** { running, done, total, ticker } while the price queue is working. */
+  priceSync: null,
   /**
    * Last known price per ticker.
    *
@@ -76,10 +82,11 @@ export async function boot() {
 
   // Silent unless something is due. See browserBackup.js.
   autoBackup(state.repo).catch((err) => console.warn('Backup skipped', err));
+  syncPrices({ auto: true }).catch((err) => console.warn('Price sync skipped', err));
 }
 
 async function loadSettings() {
-  const keys = ['equity', 'riskPct', 'defaultRule', 'theme'];
+  const keys = ['equity', 'riskPct', 'defaultRule', 'theme', 'autoPrices', 'trailType', 'trailValue'];
   for (const k of keys) {
     const v = await state.repo.getSetting(k, state.settings[k]);
     if (v != null) state.settings[k] = v;
@@ -119,7 +126,7 @@ export const openTrades = () => state.trades.filter((t) => t.status === 'OPEN');
 export const closedTrades = () => state.trades.filter((t) => t.status === 'CLOSED');
 export const summaries = () => state.trades.map((t) => tradeSummary(t));
 export const priceFor = (ticker) => state.prices[ticker] ?? null;
-export const rule = (key) => PRESETS[key] ?? PRESETS.discretionary;
+export const rule = (key) => resolveRule(key, state.settings);
 
 /* ------------------------------------------------------------------ */
 /* Actions                                                             */
@@ -221,6 +228,30 @@ export function render() {
   app.querySelector('.screen')?.scrollTo?.(0, 0);
 }
 
+/* The header rule appears only once there is content scrolled behind it. */
+let ticking = false;
+window.addEventListener(
+  'scroll',
+  () => {
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(() => {
+      document.body.classList.toggle('scrolled', window.scrollY > 4);
+      ticking = false;
+    });
+  },
+  { passive: true }
+);
+
+/* Cards and table rows navigate, so they must answer the keyboard too. */
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const el = e.target.closest?.('[data-go][tabindex]');
+  if (!el) return;
+  e.preventDefault();
+  go(el.dataset.go);
+});
+
 /* Event delegation. One listener per event type for the whole app. */
 document.addEventListener('click', (e) => {
   const goEl = e.target.closest('[data-go]');
@@ -241,3 +272,54 @@ document.addEventListener('input', (e) => {
 });
 
 export { ACTIONS, LIVE };
+
+/* ------------------------------------------------------------------ */
+/* Price sync                                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Refresh every open ticker, once, in the background.
+ *
+ * On boot this runs automatically and silently: no spinner blocking the first
+ * paint, no toast if it fails. The journal is fully usable without it, and an
+ * error message about a price feed is not what anyone wants to see when they
+ * open the app to check a position.
+ *
+ * Triggered by hand from the Home screen it is loud instead — progress while it
+ * runs, and a result either way.
+ */
+export async function syncPrices({ auto = false } = {}) {
+  const tickers = [...new Set(openTrades().map((t) => t.ticker))];
+  if (!tickers.length) return null;
+
+  if (auto) {
+    const lastRunAt = await state.repo.getSetting('lastPriceSync', null);
+    const decision = shouldAutoUpdate({ enabled: state.settings.autoPrices, lastRunAt });
+    if (!decision.update) return null;
+  }
+
+  state.priceSync = { running: true, done: 0, total: tickers.length, ticker: tickers[0] };
+  if (!auto) render();
+
+  const results = await updatePrices(tickers, {
+    onProgress: (p) => {
+      state.priceSync = { running: p.phase !== 'done', ...p };
+      if (!auto) render();
+    },
+  });
+
+  for (const q of results.updated) {
+    state.prices[q.ticker] = {
+      price: q.price,
+      at: new Date().toISOString(),
+      source: q.date ? `close ${q.date}` : 'auto',
+    };
+  }
+  if (results.updated.length) await state.repo.setSetting('prices', state.prices);
+  await state.repo.setSetting('lastPriceSync', new Date().toISOString());
+
+  state.priceSync = null;
+  if (auto) render();
+  else toast(summarize(results));
+  return results;
+}

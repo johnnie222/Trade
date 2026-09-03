@@ -55,7 +55,11 @@ async function seed({ withPrice = true } = {}) {
   state.prices = {};
   state.draft = {};
   state.route = { name: 'home', params: {} };
-  state.settings = { equity: 50000, riskPct: 1, defaultRule: 'ladderClassic', theme: 'system' };
+  state.priceSync = null;
+  state.settings = {
+    equity: 50000, riskPct: 1, defaultRule: 'ladderClassic', theme: 'system',
+    autoPrices: true, trailType: 'TRAIL_PCT', trailValue: 8,
+  };
 
   const a = await state.repo.createTrade(
     { ticker: 'DELL', setup: 'Breakout', entryEmotion: 'Calm', rule: 'ladderClassic', thesis: 'Base breakout' },
@@ -91,19 +95,71 @@ describe('every screen renders with data', () => {
   test('home', () => {
     const html = renders(renderHome(state));
     assert.match(html, /DELL/);
-    assert.match(html, /Open risk/);
+    assert.match(html, /At risk/);
     assert.match(html, /\+2\.40R/, 'DELL at 112 on a 5-point risk is +2.4R');
   });
 
   test('home surfaces the stop rule when it is triggered', () => {
     // Highest close 112 is 2.4R, so the ladder wants the stop at 1R = 105.
-    assert.match(renderHome(state), /Your rule says 105\.00/);
+    const html = renderHome(state);
+    assert.match(html, /Your rule says/);
+    assert.match(html, /105\.00/);
+    assert.match(html, /2R &rarr; 1R|2R → 1R/);
+  });
+
+  test('home shows what R is worth in dollars', () => {
+    const html = renderHome(state);
+    assert.match(html, />1R</, 'the R label');
+    assert.match(html, /\$500/, 'DELL risks $5 x 100 shares');
+    assert.match(html, /Open P&amp;L/);
+  });
+
+  test('home shows percent change from the entry', () => {
+    // Entry 100, price 112.
+    assert.match(renderHome(state), /\+12\.00%/);
+  });
+
+  test('a protected trade shows what is locked in rather than what is at risk', () => {
+    // The stop was raised to 100, which is the entry.
+    const html = renderHome(state);
+    assert.match(html, /Locked in/);
+    assert.ok(!/At risk<\/span>/.test(html.split('DELL')[1] ?? ''), 'not both at once');
+  });
+
+  test('price age is shown beside the price', () => {
+    assert.match(renderHome(state), /stamp-age/);
+  });
+
+  test('the sync bar appears only while a fetch is running', () => {
+    assert.ok(!renderHome(state).includes('sync-fill'));
+    state.priceSync = { running: true, done: 1, total: 3, ticker: 'DELL' };
+    const html = renderHome(state);
+    assert.match(html, /sync-fill/);
+    assert.match(html, /Fetching DELL/);
+    assert.match(html, /1\/3/);
+    state.priceSync = null;
   });
 
   test('trades list', () => {
     const html = renders(renderTrades(state));
     assert.match(html, /Open · 1/);
     assert.match(html, /Closed · 1/);
+  });
+
+  test('trades list shows percent change beside the R result', () => {
+    const html = renderTrades(state);
+    assert.match(html, /\+12\.00%/, 'DELL open: entry 100, price 112');
+    assert.match(html, /-6\.00%/, 'JPM closed: entry 50, exit 47');
+    assert.match(html, /-1\.00R/, 'and the R alongside it');
+    assert.match(html, /-\$300/, 'and the dollars');
+  });
+
+  test('an open trade with no price shows a dash for the move, not zero', async () => {
+    const saved = state.prices;
+    state.prices = {};
+    const html = renderTrades(state);
+    assert.ok(!html.includes('+0.00%'));
+    state.prices = saved;
   });
 
   test('trade detail, open', () => {
@@ -139,6 +195,9 @@ describe('every screen renders with data', () => {
     const html = renders(renderSettings(state));
     assert.match(html, /Backup/);
     assert.match(html, /50000/);
+    assert.match(html, /Trailing stop/);
+    assert.match(html, /then trail 8%/, 'the configured value is shown, not a placeholder');
+    assert.match(html, /Fetch prices when the app opens/);
   });
 
   test('new trade', () => {
@@ -153,7 +212,11 @@ describe('empty and partial states', () => {
     state.log = [];
     state.prices = {};
     state.draft = {};
-    state.settings = { equity: 50000, riskPct: 1, defaultRule: 'ladderClassic', theme: 'system' };
+    state.priceSync = null;
+    state.settings = {
+      equity: 50000, riskPct: 1, defaultRule: 'ladderClassic', theme: 'system',
+      autoPrices: true, trailType: 'TRAIL_PCT', trailValue: 8,
+    };
   });
 
   test('a brand new journal invites an action instead of showing zeroes', () => {
@@ -226,7 +289,7 @@ describe('the new-trade calculation', () => {
   });
 
   test('the panel warns when the size exceeds the risk setting', () => {
-    state.settings = { ...settings, riskPct: 1, defaultRule: 'ladderClassic', theme: 'system' };
+    state.settings = { ...settings, riskPct: 1, defaultRule: 'ladderClassic', theme: 'system', trailType: 'TRAIL_PCT', trailValue: 8 };
     state.draft = { new: { ticker: 'X', entry: '100', stop: '95', qty: '300', rule: 'ladderClassic' } };
     assert.match(renderNewTrade(state), /class="num r warn"/);
   });

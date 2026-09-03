@@ -21,26 +21,83 @@ export const RuleType = {
   TRAIL_USD: 'TRAIL_USD',
 };
 
-/** Presets. Defined once in Settings; picked from a dropdown at open. */
+/**
+ * Presets, defined once in Settings and picked from a dropdown at open.
+ *
+ * A ladder answers "protect a milestone once it is reached" and then has
+ * nothing more to say — past its last rung the stop simply stops moving. That
+ * is fine if you intend to manage the tail by hand, and wrong if you do not,
+ * because the largest winners spend most of their life past the last rung.
+ *
+ * `then` closes that gap: once the final rung is cleared, a trailing rule takes
+ * over. Ladder for the early protection, trail for the run.
+ */
 export const PRESETS = {
-  discretionary: { type: RuleType.NONE, label: 'Discretionary' },
+  discretionary: { type: RuleType.NONE, label: 'Manual — no rule' },
+
   beAt1R: {
     type: RuleType.LADDER,
-    label: 'Breakeven at 1R',
+    label: 'Breakeven at 1R, then manual',
     rungs: [{ triggerR: 1, stopR: 0 }],
   },
+
   ladderClassic: {
     type: RuleType.LADDER,
-    label: '1R→BE, 2R→1R, 3R→2R',
+    label: '1R→BE, 2R→1R, 3R→2R, then manual',
     rungs: [
       { triggerR: 1, stopR: 0 },
       { triggerR: 2, stopR: 1 },
       { triggerR: 3, stopR: 2 },
     ],
   },
-  trail1_5R: { type: RuleType.TRAIL_R, label: 'Trail 1.5R below high', n: 1.5 },
-  trail8pct: { type: RuleType.TRAIL_PCT, label: 'Trail 8% below high', pct: 8 },
+
+  ladderThenTrail: {
+    type: RuleType.LADDER,
+    label: '1R→BE, 2R→1R, then trail',
+    rungs: [
+      { triggerR: 1, stopR: 0 },
+      { triggerR: 2, stopR: 1 },
+    ],
+    then: { type: RuleType.TRAIL_PCT, pct: 8 },
+  },
+
+  trailOnly: { type: RuleType.TRAIL_PCT, label: 'Trail from the start', pct: 8 },
+
+  trail1_5R: { type: RuleType.TRAIL_R, label: 'Trail 1.5R below the high', n: 1.5 },
 };
+
+/** Which presets read their trail value from Settings. */
+export const CONFIGURABLE = ['ladderThenTrail', 'trailOnly'];
+
+/**
+ * Fill a preset's trailing leg from the trader's own setting.
+ *
+ * Presets are shapes, not values. "Trail 8%" is a shape; whether 8 is the right
+ * number is a decision that belongs to the person, and hard-coding it would
+ * mean every trader gets the author's guess.
+ *
+ * @param {string} key
+ * @param {object} [settings]  { trailType: 'TRAIL_PCT'|'TRAIL_USD'|'TRAIL_R', trailValue: number }
+ */
+export function resolveRule(key, settings = {}) {
+  const preset = PRESETS[key];
+  if (!preset) return PRESETS.discretionary;
+  if (!CONFIGURABLE.includes(key)) return preset;
+
+  const type = settings.trailType ?? RuleType.TRAIL_PCT;
+  const value = Number(settings.trailValue ?? 8);
+  const leg = { type };
+  if (type === RuleType.TRAIL_PCT) leg.pct = value;
+  else if (type === RuleType.TRAIL_USD) leg.usd = value;
+  else leg.n = value;
+
+  const suffix =
+    type === RuleType.TRAIL_PCT ? `${value}%` : type === RuleType.TRAIL_USD ? `$${value}` : `${value}R`;
+
+  return preset.type === RuleType.LADDER
+    ? { ...preset, label: `1R→BE, 2R→1R, then trail ${suffix}`, then: leg }
+    : { ...preset, ...leg, label: `Trail ${suffix} from the start` };
+}
 
 /**
  * @param {object|null} rule
@@ -72,14 +129,23 @@ export function evaluateStopRule(rule, ctx) {
   switch (rule.type) {
     case RuleType.LADDER: {
       const maxCloseR = (highestClose - entryPrice) / riskPerShare;
-      // Highest rung whose trigger has been met on a close.
-      const hit = [...(rule.rungs ?? [])]
-        .sort((a, b) => a.triggerR - b.triggerR)
-        .filter((r) => maxCloseR >= r.triggerR - EPS)
-        .pop();
+      const rungs = [...(rule.rungs ?? [])].sort((a, b) => a.triggerR - b.triggerR);
+      const hit = rungs.filter((r) => maxCloseR >= r.triggerR - EPS).pop();
       if (hit) {
         ruleStop = entryPrice + hit.stopR * riskPerShare;
         triggeredBy = `${hit.triggerR}R → ${hit.stopR}R`;
+      }
+
+      // Past the last rung the trailing leg takes over. Both are evaluated and
+      // the higher wins, so the handoff can never lower a stop the ladder has
+      // already earned.
+      const last = rungs.at(-1);
+      if (rule.then && last && maxCloseR >= last.triggerR - EPS) {
+        const tail = evaluateStopRule({ ...rule.then, rungs: undefined, then: undefined }, ctx);
+        if (tail.ruleStop != null && (ruleStop == null || tail.ruleStop > ruleStop)) {
+          ruleStop = tail.ruleStop;
+          triggeredBy = tail.triggeredBy;
+        }
       }
       break;
     }

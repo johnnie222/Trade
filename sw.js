@@ -9,7 +9,7 @@
  * are deleted on activate, so a stale shell cannot survive a release.
  */
 
-const VERSION = 'tj-v2';
+const VERSION = 'tj-v3';
 const SHELL = [
   './',
   './index.html',
@@ -36,6 +36,7 @@ const SHELL = [
   './src/data/repo.js',
   './src/data/backup.js',
   './src/data/browserBackup.js',
+  './src/data/marketData.js',
   './src/export/csv.js',
   './src/export/markdown.js',
 ];

@@ -1,7 +1,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { evaluateStopRule, simulateRule, RuleType, PRESETS } from '../src/core/stopRules.js';
+import { evaluateStopRule, simulateRule, resolveRule, RuleType, PRESETS } from '../src/core/stopRules.js';
 
 const near = (a, b, msg, tol = 1e-6) =>
   assert.ok(Math.abs(a - b) < tol, `${msg ?? ''} expected ${b}, got ${a}`);
@@ -68,7 +68,7 @@ describe('trailing rules', () => {
   });
 
   test('trail a percentage below the highest close', () => {
-    near(evaluateStopRule(PRESETS.trail8pct, ctx(120)).ruleStop, 110.4);
+    near(evaluateStopRule(resolveRule('trailOnly', { trailType: 'TRAIL_PCT', trailValue: 8 }), ctx(120)).ruleStop, 110.4);
   });
 
   test('trail a dollar amount', () => {
@@ -184,5 +184,79 @@ describe('counterfactual simulation', () => {
 
   test('no bars means no simulation', () => {
     assert.equal(simulateRule(PRESETS.ladderClassic, { ...base, bars: [] }), null);
+  });
+});
+
+describe('configurable trail values', () => {
+  test('a percent trail reads its number from settings', () => {
+    const r = resolveRule('trailOnly', { trailType: RuleType.TRAIL_PCT, trailValue: 12 });
+    near(evaluateStopRule(r, ctx(120)).ruleStop, 105.6);
+    assert.match(r.label, /Trail 12% from the start/);
+  });
+
+  test('a dollar trail', () => {
+    const r = resolveRule('trailOnly', { trailType: RuleType.TRAIL_USD, trailValue: 7 });
+    near(evaluateStopRule(r, ctx(120)).ruleStop, 113);
+  });
+
+  test('an R trail', () => {
+    const r = resolveRule('trailOnly', { trailType: RuleType.TRAIL_R, trailValue: 2 });
+    near(evaluateStopRule(r, ctx(120)).ruleStop, 110);
+  });
+
+  test('presets without a trailing leg ignore the settings', () => {
+    assert.equal(resolveRule('ladderClassic', { trailValue: 99 }), PRESETS.ladderClassic);
+  });
+
+  test('an unknown key falls back to discretionary rather than throwing', () => {
+    assert.equal(resolveRule('nonsense', {}).type, RuleType.NONE);
+  });
+});
+
+describe('ladder handing off to a trail', () => {
+  const rule = () => resolveRule('ladderThenTrail', { trailType: RuleType.TRAIL_PCT, trailValue: 10 });
+
+  test('below the last rung the ladder alone applies', () => {
+    // 1.2R: past the 1R rung, short of the 2R rung, so no handoff yet.
+    const r = evaluateStopRule(rule(), ctx(106));
+    near(r.ruleStop, 100, 'breakeven from the 1R rung');
+    assert.equal(r.triggeredBy, '1R → 0R');
+  });
+
+  test('at the last rung the ladder still wins while the trail sits lower', () => {
+    // 2R close of 110: ladder says 105, a 10% trail says 99.
+    const r = evaluateStopRule(rule(), ctx(110));
+    near(r.ruleStop, 105, 'the higher of the two');
+    assert.equal(r.triggeredBy, '2R → 1R');
+  });
+
+  test('past the last rung the trail takes over', () => {
+    // 140 is 8R. The ladder is stuck at 105; a 10% trail is at 126.
+    const r = evaluateStopRule(rule(), ctx(140));
+    near(r.ruleStop, 126);
+    assert.match(r.triggeredBy, /trail 10%/);
+  });
+
+  test('the handoff can never lower the stop the ladder earned', () => {
+    const tight = resolveRule('ladderThenTrail', { trailType: RuleType.TRAIL_PCT, trailValue: 40 });
+    const r = evaluateStopRule(tight, ctx(115));
+    near(r.ruleStop, 105, 'a 40% trail sits far below the 1R rung, so the rung holds');
+  });
+
+  test('a ladder with no trailing leg simply stops moving', () => {
+    const r = evaluateStopRule(PRESETS.ladderClassic, ctx(200));
+    near(r.ruleStop, 110, 'the 3R rung is the end of it');
+  });
+
+  test('the handoff survives the counterfactual simulator', () => {
+    const bar = (date, o, h, l, c) => ({ date, open: o, high: h, low: l, close: c });
+    const bars = [
+      bar('2026-08-03', 100, 112, 99, 111), // 2.2R -> ladder to 105
+      bar('2026-08-04', 111, 141, 110, 140), // 8R -> trail to 126
+      bar('2026-08-05', 140, 142, 125, 127), // low 125 takes the 126 stop
+    ];
+    const r = simulateRule(rule(), { entryPrice: 100, initialStop: 95, riskPerShare: 5, bars });
+    near(r.exitPrice, 126);
+    near(r.resultR, 5.2, 'the trail banked far more than the ladder would have');
   });
 });

@@ -17,7 +17,9 @@ Full product spec: `spec.md` · Setup and deployment: `SETUP.md`
 - [x] Statistics: dashboard, monthly/weekly rollups, breakdowns, comparison
 - [x] All seven screens, PWA shell, offline service worker
 - [x] Review export (Markdown), trades CSV, events CSV, JSON
-- [ ] EOD market data provider (Phase 2)
+- [x] EOD price fetch on open, with a queue and manual fallback
+- [x] Ladder rules that hand off to a trailing stop
+- [ ] Daily bars for MFE / MAE and the rule counterfactual (Phase 2)
 - [ ] Screenshots and Android share target (Phase 2)
 - [ ] Hebrew / RTL (Phase 2)
 
@@ -26,7 +28,7 @@ Full product spec: `spec.md` · Setup and deployment: `SETUP.md`
 Node 22+. Nothing to install, nothing to build.
 
 ```bash
-npm test          # 195 tests
+npm test          # 233 tests
 npm start         # serves on http://localhost:8080
 ```
 
@@ -34,7 +36,7 @@ It is a plain static site: any HTTP server works, and GitHub Pages needs no
 configuration. Opening `index.html` from the filesystem will not work — ES
 modules and service workers both require an origin.
 
-195 tests, zero dependencies, no build step.
+233 tests, zero dependencies, no build step.
 
 ## The model
 
@@ -101,6 +103,12 @@ The split case is the interesting one: a 2:1 split halves `riskPerShare` and dou
 
 **Comparison arrows are withheld below five trades a side.** The delta is always reported; the claim that it means something is not.
 
+**A ladder alone stops managing the trade past its last rung.** That is correct if you intend to handle the tail by hand and wrong if you do not, since the biggest winners spend most of their life past the last rung. `then` hands the ladder off to a trailing rule once the final rung clears, and the two are evaluated together with the higher winning — so the handoff can never lower a stop the ladder already earned.
+
+**Trail values live in Settings, not in the presets.** "Trail 8%" is a shape; whether 8 is right is the trader's decision. Hard-coding it would hand every trader the author's guess.
+
+**Price fetching fails soft, always.** A browser can only read a response the server allows it to, and most free quote endpoints do not send the header that permits it. Every failure falls through to the last known price and then to typing one — and `Settings → Test the price source` answers the CORS question on the real device in one tap, since no amount of documentation can.
+
 **Prices are not events.** The log records decisions the trader made; a quote is an observation about the market. Mixing them would put a row in the trade timeline every time a price refreshed. Prices live in settings under `price:TICKER` and are replaced, never appended — which is also why swapping manual entry for an EOD feed in Phase 2 touches nothing else.
 
 **`ACTIONS` and `LIVE` live in `registry.js`, a module with no imports.** `app.js` imports the screens and the screens need somewhere to register handlers; if that somewhere were `app.js`, the screen bodies would run during its import phase, before its `const` declarations initialise, and every screen would throw on load.
@@ -132,9 +140,10 @@ src/data/
   store.js       storage adapters: IdbStore (browser), MemoryStore (tests)
   repo.js        the only writer — validates every append before it persists
   backup.js      policy, serialize, restore, merge
+  marketData.js  provider, update queue, freshness
   browserBackup.js  File System Access API + download fallback
 
-test/            195 tests, node:test
+test/            233 tests, node:test
 ```
 
 The core is pure and framework-free. It runs unchanged in Node and in the browser.
