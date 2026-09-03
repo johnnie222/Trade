@@ -1,4 +1,4 @@
-/* v6 visual overrides: explicit themes, market context, portfolio card and R rail. */
+/* v7 visual overrides: explicit themes and the Today trading cockpit. */
 
 [data-theme="light"] {
   color-scheme: light;
@@ -42,29 +42,42 @@
   --accent: #7aa2d9;
 }
 
+/* --------------------------------------------------------------------------
+   Market context
+   -------------------------------------------------------------------------- */
+
 .market-strip {
   display: grid;
   grid-template-columns: 1fr auto;
   align-items: center;
-  gap: 2px var(--sp-3);
-  margin: 0 0 var(--sp-3);
-  padding: var(--sp-2) var(--sp-3);
+  gap: 3px var(--sp-3);
+  margin: calc(-1 * var(--sp-4)) calc(-1 * var(--sp-4)) var(--sp-4);
+  padding: var(--sp-3) var(--sp-4);
   border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--surface) 65%, transparent);
+  border-top: 0;
+  border-radius: 0 0 var(--radius) var(--radius);
+  background: color-mix(in srgb, var(--surface) 68%, transparent);
   color: var(--text-2);
   font-size: var(--step--1);
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 5px 18px rgb(0 0 0 / 0.035);
 }
 .market-place { white-space: nowrap; }
 .market-place .num { color: var(--text); }
 .market-session { justify-self: end; white-space: nowrap; }
 .market-session.open { color: var(--pos); font-weight: 650; }
-.market-icon { display: inline-block; width: 1.2em; text-align: center; margin-right: 3px; }
-.market-strip.pre .market-icon { color: var(--warn); }
+.market-icon {
+  display: inline-block;
+  width: 1.2em;
+  text-align: center;
+  margin-right: 3px;
+  font-weight: 700;
+}
+.market-strip.pre .market-icon { color: #f2a24a; }
 .market-strip.after .market-icon,
-.market-strip.closed .market-icon { color: var(--text-3); }
+.market-strip.closed .market-icon { color: #9a7bd8; }
+.market-strip.regular .market-icon { color: var(--pos); }
 .market-countdown {
   grid-column: 1 / -1;
   color: var(--text-3);
@@ -73,24 +86,99 @@
   font-size: 11px;
 }
 
-.risk-hero {
+/* --------------------------------------------------------------------------
+   Portfolio summary
+   -------------------------------------------------------------------------- */
+
+.portfolio-hero {
   background:
-    linear-gradient(145deg, color-mix(in srgb, var(--accent) 7%, transparent), transparent 58%),
+    linear-gradient(145deg, color-mix(in srgb, var(--accent) 6%, transparent), transparent 58%),
     linear-gradient(180deg, var(--surface), var(--surface-2));
 }
-.risk-headline { margin-top: 0; }
-.hero-split.hero-split-3 { grid-template-columns: 1.35fr 1fr .7fr; }
+.portfolio-head { margin-bottom: var(--sp-4); }
+.portfolio-kpis {
+  display: grid;
+  grid-template-columns: 1.05fr 1.25fr .9fr;
+  gap: var(--sp-3);
+  align-items: end;
+}
+.portfolio-kpis > div { min-width: 0; }
+.portfolio-kpis .label { display: block; margin-bottom: 3px; }
+.portfolio-kpis .num {
+  display: block;
+  font-size: var(--step-1);
+  white-space: nowrap;
+}
+.portfolio-kpis .today-combo { font-size: var(--step-0); }
+
+.portfolio-risk-footer {
+  margin-top: var(--sp-4);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--border);
+}
+.portfolio-risk-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+.portfolio-risk-value {
+  font-size: var(--step-0);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.portfolio-risk-value .muted { font-family: var(--sans); font-size: var(--step--1); }
 .risk-state {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  margin-top: var(--sp-3);
+  margin-top: var(--sp-2);
   font-size: var(--step--1);
   color: var(--text-2);
 }
 .risk-dot { color: var(--text-3); }
+.portfolio-risk-footer .fineprint { margin-top: var(--sp-2); }
 
-/* Capsule-style R progress: substantial enough to read, still minimal. */
+/* --------------------------------------------------------------------------
+   Trade identity
+   -------------------------------------------------------------------------- */
+
+.trade-card-head { align-items: center; }
+.ticker-identity {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.ticker-logo {
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+  border-radius: 7px;
+  background: var(--surface-2);
+}
+.ticker-logo img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  padding: 2px;
+}
+.ticker-setup { margin-left: var(--sp-2); }
+.today-kv .combo {
+  font-size: var(--step--1);
+  white-space: nowrap;
+}
+.trade-card .card-foot { flex-wrap: wrap; }
+.trade-card .card-foot .stamp { margin-left: auto; }
+
+/* --------------------------------------------------------------------------
+   The R rail — track is a capsule; progress is a clean straight segment.
+   -------------------------------------------------------------------------- */
+
 .rail {
   --rail-h: 8px;
   height: 38px;
@@ -104,21 +192,25 @@
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border) 55%, transparent);
 }
 .rail-fill {
+  z-index: 1;
   top: 10px;
   height: var(--rail-h);
-  border-radius: 999px;
+  border-radius: 1px;
 }
 .rail-dot {
+  z-index: 2;
   position: absolute;
-  top: 12px;
-  width: 4px;
-  height: 4px;
+  top: 11px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  background: color-mix(in srgb, var(--text-3) 72%, var(--surface));
-  transform: translateX(-2px);
+  background: var(--surface);
+  border: 1px solid color-mix(in srgb, var(--text-3) 80%, var(--surface));
+  transform: translateX(-3px);
 }
-.rail-dot.entry { background: var(--text-2); }
+.rail-dot.entry { border-color: var(--text-2); }
 .rail-now {
+  z-index: 3;
   top: 7px;
   width: 14px;
   height: 14px;
@@ -132,15 +224,30 @@
 .rail-now.neg { background: var(--neg); }
 .rail-label { top: 24px; }
 
+/* Existing compact Trades table. */
 .trades-compact table.rows td,
 .trades-compact table.rows th { padding-left: var(--sp-3); padding-right: var(--sp-3); }
 .trades-compact td:nth-child(n+2),
 .trades-compact th:nth-child(n+2) { white-space: nowrap; }
 
 @media (max-width: 430px) {
-  .hero-split.hero-split-3 { gap: var(--sp-2); }
-  .hero-split-3 .label { font-size: 10px; letter-spacing: .045em; }
+  .portfolio-kpis { gap: var(--sp-2); }
+  .portfolio-kpis .label { font-size: 10px; letter-spacing: .045em; }
+  .portfolio-kpis .num { font-size: 13px; }
+  .portfolio-kpis .today-combo { font-size: 11px; }
+  .portfolio-risk-line { align-items: flex-start; }
+  .portfolio-risk-value { font-size: var(--step--1); }
+  .ticker-logo { width: 24px; height: 24px; flex-basis: 24px; }
+  .today-kv .combo { font-size: 11px; letter-spacing: -.02em; }
   .trades-compact table.rows td,
   .trades-compact table.rows th { padding: var(--sp-3) var(--sp-2); }
   .trades-compact th { font-size: 10px; }
+}
+
+@media (min-width: 720px) {
+  .market-strip {
+    margin: calc(-1 * var(--sp-5)) calc(-1 * var(--sp-5)) var(--sp-5);
+    padding-left: var(--sp-5);
+    padding-right: var(--sp-5);
+  }
 }
