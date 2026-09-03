@@ -1,18 +1,45 @@
 /**
- * Today: portfolio state first, then the open trades.
+ * Today: market context, portfolio state, then open trades.
  *
- * The screen is intentionally operational rather than analytical: market
- * context, what is still at risk, what is already protected, and the current
- * state of each trade in its own R terms.
+ * This screen stays operational rather than analytical. Daily market context is
+ * useful here; volume, 52-week ranges and other research data belong deeper in
+ * the trade detail screen.
  */
 
 import { ACTIONS } from '../registry.js';
-import { state, openTrades, priceFor, rule } from '../app.js';
+import { state, openTrades, priceFor, logoFor, rule } from '../app.js';
 import { portfolioRisk, currentR, totalPnl, tradeStatusLabel, isProtected, openRisk, lockedIn } from '../../core/engine.js';
 import { evaluateStopRule } from '../../core/stopRules.js';
 import { priceAge } from '../../data/marketData.js';
 import { marketStatusHtml } from '../marketClock.js';
 import { rail, rval, dollars, price as fmtPrice, pct, tone, shortDate, daysBetween, esc } from '../format.js';
+
+const etTime = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/New_York',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+});
+
+function signedPct(x, dp = 1) {
+  if (x == null || !Number.isFinite(x)) return '—';
+  return `${x > 0 ? '+' : ''}${(x * 100).toFixed(dp)}%`;
+}
+
+function dailyMove(t, p) {
+  if (!p || !Number.isFinite(p.price) || !Number.isFinite(p.previousClose) || !(p.previousClose > 0)) return null;
+  const perShare = p.price - p.previousClose;
+  return {
+    dollars: perShare * t.qty,
+    percent: Number.isFinite(p.dailyPercent) ? p.dailyPercent : perShare / p.previousClose,
+    base: p.previousClose * t.qty,
+  };
+}
+
+function dailyText(move) {
+  if (!move) return '—';
+  return `${dollars(move.dollars)} (${signedPct(move.percent)})`;
+}
 
 function ruleFlag(t) {
   const p = priceFor(t.ticker);
@@ -28,29 +55,49 @@ function ruleFlag(t) {
 }
 
 function freshness(p) {
+  if (!p?.at) return '';
   const age = priceAge(p);
-  if (!age) return '';
-  return `<span class="stamp ${age.level === 'stale' ? 'warn' : ''}">${fmtPrice(
-    p.price
-  )} <span class="stamp-age">${age.label}</span></span>`;
+  const source = esc(String(p.source ?? 'Market data').split(' · ')[0]);
+  const time = etTime.format(new Date(p.at));
+  return `<span class="stamp ${age?.level === 'stale' ? 'warn' : ''}">Updated ${time} ET <span class="stamp-age">· ${source}</span></span>`;
+}
+
+function cardStatus(t, p, r) {
+  if (!p) return 'Open';
+  if (tradeStatusLabel(t, p.price) === 'Near Stop') return 'Near Stop';
+  if (Number.isFinite(r) && r >= 3) return '3R+';
+  if (Number.isFinite(r) && r >= 2) return '2R+';
+  if (Number.isFinite(r) && r >= 1) return '1R+';
+  if (isProtected(t)) return 'Protected';
+  return 'Open';
+}
+
+function tickerIdentity(t) {
+  const logo = logoFor(t.ticker);
+  return `<div class="ticker-identity">
+    ${
+      logo
+        ? `<span class="ticker-logo"><img src="${esc(logo)}" alt="" loading="lazy" onerror="this.closest('.ticker-logo')?.remove()"></span>`
+        : ''
+    }
+    <div><span class="ticker">${esc(t.ticker)}</span><span class="muted ticker-setup">${esc(t.setup ?? 'Untagged')}</span></div>
+  </div>`;
 }
 
 function tradeCard(t) {
   const p = priceFor(t.ticker);
   const r = p ? currentR(t, p.price) : null;
   const pnl = p ? totalPnl(t, p.price) : null;
-  const status = p ? tradeStatusLabel(t, p.price) : 'Open';
+  const status = cardStatus(t, p, r);
   const flag = ruleFlag(t);
-  const statusTone = status === 'Near Stop' ? 'warn' : isProtected(t) ? 'pos' : '';
+  const statusTone = status === 'Near Stop' ? 'warn' : status.endsWith('R+') || isProtected(t) ? 'pos' : '';
   const chg = p ? (p.price - t.entryPrice) / t.entryPrice : null;
+  const today = dailyMove(t, p);
 
   return `
     <article class="card trade-card" data-go="trade/${t.id}" role="link" tabindex="0">
-      <div class="card-head">
-        <div>
-          <span class="ticker">${esc(t.ticker)}</span>
-          <span class="muted" style="margin-left:var(--sp-2)">${esc(t.setup ?? 'Untagged')}</span>
-        </div>
+      <div class="card-head trade-card-head">
+        ${tickerIdentity(t)}
         <span class="pill ${statusTone}">${status}</span>
       </div>
 
@@ -61,13 +108,11 @@ function tradeCard(t) {
 
       ${rail({
         entry: t.entryPrice,
-        stop: t.initialStop,
-        activeStop: t.activeStop,
         current: p?.price,
         riskPerShare: t.riskPerShare,
       })}
 
-      <div class="kv">
+      <div class="kv today-kv">
         <div><span class="label">Now</span><span class="num">${fmtPrice(p?.price)}</span></div>
         <div><span class="label">Change</span><span class="num ${tone(chg)}">${
           chg == null ? '&mdash;' : `${chg >= 0 ? '+' : ''}${(chg * 100).toFixed(2)}%`
@@ -75,7 +120,7 @@ function tradeCard(t) {
         <div><span class="label">Stop</span><span class="num ${isProtected(t) ? 'pos' : ''}">${fmtPrice(
           t.activeStop
         )}</span></div>
-        <div><span class="label">1R</span><span class="num">${dollars(t.R, { sign: false })}</span></div>
+        <div><span class="label">Today</span><span class="num combo ${tone(today?.dollars)}">${dailyText(today)}</span></div>
         <div><span class="label">${isProtected(t) ? 'Locked in' : 'At risk'}</span><span class="num ${
           isProtected(t) ? 'pos' : ''
         }">${isProtected(t) ? dollars(lockedIn(t)) : dollars(openRisk(t), { sign: false })}</span></div>
@@ -142,27 +187,44 @@ export function renderHome(s) {
   const protectedCount = open.filter(isProtected).length;
   const atRiskCount = open.length - protectedCount;
 
+  const daily = open.map((t) => dailyMove(t, priceFor(t.ticker)));
+  const hasCompleteDaily = open.length > 0 && daily.every(Boolean);
+  const portfolioTodayDollars = hasCompleteDaily ? daily.reduce((a, x) => a + x.dollars, 0) : null;
+  const portfolioDailyBase = hasCompleteDaily ? daily.reduce((a, x) => a + x.base, 0) : null;
+  const portfolioTodayPct = portfolioDailyBase ? portfolioTodayDollars / portfolioDailyBase : null;
+  const portfolioToday =
+    portfolioTodayDollars == null
+      ? '—'
+      : `${dollars(portfolioTodayDollars)} (${signedPct(portfolioTodayPct)})`;
+
   return `
     ${marketStatusHtml(s.settings.marketHours)}
 
-    <section class="card hero risk-hero">
-      <div class="card-head">
-        <span class="label">Portfolio risk</span>
+    <section class="card hero portfolio-hero">
+      <div class="card-head portfolio-head">
+        <span class="label">Portfolio</span>
         <span class="muted">${open.length} position${open.length === 1 ? '' : 's'}</span>
       </div>
-      <div class="headline risk-headline">
-        <span class="num">${dollars(risk.total, { sign: false })}</span>
-        <span class="headline-sub muted">${pct(risk.total / s.settings.equity, { dp: 2 })} of account</span>
-      </div>
-      <div class="hero-split hero-split-3">
+
+      <div class="portfolio-kpis">
         <div><span class="label">Open gain/loss</span><span class="num r ${tone(unrealized)}">${dollars(unrealized)}</span></div>
+        <div><span class="label">Today</span><span class="num r today-combo ${tone(portfolioTodayDollars)}">${portfolioToday}</span></div>
         <div><span class="label">Locked in</span><span class="num r ${tone(locked)}">${dollars(locked)}</span></div>
-        <div><span class="label">Positions</span><span class="num">${open.length}</span></div>
       </div>
-      <div class="risk-state">
-        <span>${atRiskCount} at risk</span><span class="risk-dot">·</span><span class="pos">${protectedCount} protected</span>
+
+      <div class="portfolio-risk-footer">
+        <div class="portfolio-risk-line">
+          <span class="label">Portfolio risk</span>
+          <span class="num portfolio-risk-value">${dollars(risk.total, { sign: false })} <span class="muted">· ${pct(
+            risk.total / s.settings.equity,
+            { dp: 2 }
+          )} of account</span></span>
+        </div>
+        <div class="risk-state">
+          <span>${atRiskCount} at risk</span><span class="risk-dot">·</span><span class="pos">${protectedCount} protected</span>
+        </div>
+        <p class="fineprint">Assumes stops fill at their price. Gaps may exceed risk.</p>
       </div>
-      <p class="fineprint">Assumes every stop fills at its price. Gaps can exceed the stated risk.</p>
     </section>
 
     ${syncBar(s.priceSync)}
