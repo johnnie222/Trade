@@ -2,9 +2,7 @@
  * App shell: state, routing and the actions every screen calls.
  *
  * Rendering is a plain function of state to an HTML string, re-run on change.
- * No framework, no build step, no dependency that can break offline. With a
- * handful of screens and no per-keystroke re-render this is faster to load and
- * far less to maintain than anything it would be replaced with.
+ * No framework, no build step, no dependency that can break offline.
  */
 
 import { ACTIONS, LIVE } from './registry.js';
@@ -14,7 +12,8 @@ import { autoBackup } from '../data/browserBackup.js';
 import * as E from '../core/events.js';
 import { tradeSummary } from '../core/metrics.js';
 import { resolveRule, withTradeTrailing } from '../core/stopRules.js';
-import { updatePrices, shouldAutoUpdate, summarize } from '../data/marketData.js';
+import { fetchQuote, updatePrices, summarize, defaultProviders } from '../data/marketData.js';
+import { updateMarketClock } from './marketClock.js';
 
 import { renderHome } from './screens/home.js';
 import { renderNewTrade } from './screens/newTrade.js';
@@ -34,19 +33,11 @@ export const state = {
     riskPct: 1,
     defaultRule: 'ladderClassic',
     theme: 'system',
-    autoPrices: true,
+    marketHours: 'regular',
   },
-  /** { running, done, total, ticker } while the price queue is working. */
+  /** { running, done, total, ticker } while the explicit price queue is working. */
   priceSync: null,
-  /**
-   * Last known price per ticker.
-   *
-   * Deliberately NOT in the event log. The log records decisions the trader
-   * made; a quote is an observation about the market. Mixing the two would put
-   * a row in the trade timeline every time a price refreshed, and would make
-   * the "what did I do" feed unreadable. Prices live in settings under
-   * `price:TICKER` and are replaced, never appended.
-   */
+  /** Quotes are observations, not trade events. */
   prices: {},
   highs: {},
   priceSheet: null,
@@ -77,17 +68,20 @@ export async function boot() {
   window.addEventListener('hashchange', () => {
     parseRoute();
     render();
+    refreshRoutePrice().catch(() => {});
   });
   parseRoute();
   render();
+  refreshRoutePrice().catch(() => {});
 
-  // Silent unless something is due. See browserBackup.js.
+  // The NY clock is local calculation only — no market-data polling.
+  window.setInterval(() => updateMarketClock(state.settings.marketHours), 30000);
+
   autoBackup(state.repo).catch((err) => console.warn('Backup skipped', err));
-  syncPrices({ auto: true }).catch((err) => console.warn('Price sync skipped', err));
 }
 
 async function loadSettings() {
-  const keys = ['equity', 'riskPct', 'defaultRule', 'theme', 'autoPrices'];
+  const keys = ['equity', 'riskPct', 'defaultRule', 'theme', 'marketHours'];
   for (const k of keys) {
     const v = await state.repo.getSetting(k, state.settings[k]);
     if (v != null) state.settings[k] = v;
@@ -118,6 +112,13 @@ function parseRoute() {
 
 export function go(hash) {
   location.hash = hash;
+}
+
+async function refreshRoutePrice() {
+  if (state.route.name !== 'trade') return;
+  const t = state.trades.find((x) => x.id === state.route.params.id);
+  if (!t || t.status !== 'OPEN') return;
+  await refreshPrice(t.ticker, { repaint: true });
 }
 
 /* ------------------------------------------------------------------ */
@@ -165,6 +166,40 @@ export async function setPrice(ticker, value, source = 'manual') {
   }
   await state.repo.setSetting('prices', state.prices);
   await state.repo.setSetting('priceHighs', state.highs);
+}
+
+function sourceLabel(provider) {
+  if (provider === 'twelve') return 'Twelve Data';
+  if (provider === 'yahoo') return 'Yahoo';
+  if (provider === 'stooq') return 'Stooq';
+  return provider || 'market data';
+}
+
+async function saveQuote(ticker, q) {
+  state.prices[ticker] = {
+    price: q.price,
+    at: new Date().toISOString(),
+    source: `${sourceLabel(q.provider)}${q.date ? ` · ${q.date}` : ''}`,
+  };
+  for (const trade of openTrades().filter((t) => t.ticker === ticker)) {
+    state.highs[trade.id] = Math.max(state.highs[trade.id] ?? trade.entryPrice, q.price);
+  }
+  await state.repo.setSetting('prices', state.prices);
+  await state.repo.setSetting('priceHighs', state.highs);
+}
+
+/** Fetch one on-demand snapshot. Failure is intentionally silent. */
+export async function refreshPrice(ticker, { repaint = false } = {}) {
+  const symbol = String(ticker ?? '').trim().toUpperCase();
+  if (!symbol) return null;
+  try {
+    const q = await fetchQuote(symbol, { providers: defaultProviders() });
+    await saveQuote(symbol, q);
+    if (repaint) render();
+    return state.prices[symbol];
+  } catch {
+    return null;
+  }
 }
 
 const PRICE_DRAFT_KEY = 'trade-journal:price-sheet';
@@ -238,8 +273,6 @@ export async function append(tradeId, ev, message) {
     if (message) toast(message);
     else render();
   } catch (err) {
-    // The repository rejects anything that would make the log unprojectable,
-    // so this is where an impossible action surfaces as plain language.
     toast(err.message);
   }
 }
@@ -295,7 +328,6 @@ export function render() {
   app.querySelector('.screen')?.scrollTo?.(0, 0);
 }
 
-/* The header rule appears only once there is content scrolled behind it. */
 let ticking = false;
 window.addEventListener(
   'scroll',
@@ -310,7 +342,6 @@ window.addEventListener(
   { passive: true }
 );
 
-/* Cards and table rows navigate, so they must answer the keyboard too. */
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Enter' && e.key !== ' ') return;
   const el = e.target.closest?.('[data-go][tabindex]');
@@ -319,8 +350,9 @@ document.addEventListener('keydown', (e) => {
   go(el.dataset.go);
 });
 
-/* Event delegation. One listener per event type for the whole app. */
-document.addEventListener('click', (e) => {
+const PRICE_SENSITIVE_ACTIONS = new Set(['raiseStop', 'trim', 'addShares', 'closeTrade']);
+
+document.addEventListener('click', async (e) => {
   const goEl = e.target.closest('[data-go]');
   if (goEl) {
     go(goEl.dataset.go);
@@ -328,8 +360,14 @@ document.addEventListener('click', (e) => {
   }
   const actionEl = e.target.closest('[data-action]');
   if (actionEl) {
-    const handler = ACTIONS[actionEl.dataset.action];
-    if (handler) handler(actionEl, e);
+    const action = actionEl.dataset.action;
+    const handler = ACTIONS[action];
+    if (!handler) return;
+    if (PRICE_SENSITIVE_ACTIONS.has(action) && actionEl.dataset.id) {
+      const trade = state.trades.find((t) => t.id === actionEl.dataset.id);
+      if (trade?.status === 'OPEN') await refreshPrice(trade.ticker);
+    }
+    handler(actionEl, e);
   }
 });
 
@@ -367,59 +405,36 @@ ACTIONS.savePriceSheet = async () => {
 };
 
 /* ------------------------------------------------------------------ */
-/* Price sync                                                          */
+/* Price snapshots                                                     */
 /* ------------------------------------------------------------------ */
 
 /**
- * Refresh every open ticker, once, in the background.
- *
- * On boot this runs automatically and silently: no spinner blocking the first
- * paint, no toast if it fails. The journal is fully usable without it, and an
- * error message about a price feed is not what anyone wants to see when they
- * open the app to check a position.
- *
- * Triggered by hand from the Home screen it is loud instead — progress while it
- * runs, and a result either way.
+ * Explicit multi-symbol refresh. This is invoked by the Update prices button;
+ * there is no boot refresh, interval or stream.
  */
-export async function syncPrices({ auto = false } = {}) {
-  const tickers = [...new Set(openTrades().map((t) => t.ticker))];
-  if (!tickers.length) return null;
+export async function syncPrices({ tickers = null, manualFallback = false, showProgress = false } = {}) {
+  const list = tickers?.length ? [...new Set(tickers)] : [...new Set(openTrades().map((t) => t.ticker))];
+  if (!list.length) return null;
 
-  if (auto) {
-    const lastRunAt = await state.repo.getSetting('lastPriceSync', null);
-    const decision = shouldAutoUpdate({ enabled: state.settings.autoPrices, lastRunAt });
-    if (!decision.update) return null;
+  if (showProgress) {
+    state.priceSync = { running: true, done: 0, total: list.length, ticker: list[0] };
+    render();
   }
 
-  state.priceSync = { running: true, done: 0, total: tickers.length, ticker: tickers[0] };
-  if (!auto) render();
-
-  const results = await updatePrices(tickers, {
+  const results = await updatePrices(list, {
+    providers: defaultProviders(),
     onProgress: (p) => {
+      if (!showProgress) return;
       state.priceSync = { running: p.phase !== 'done', ...p };
-      if (!auto) render();
+      render();
     },
   });
 
-  for (const q of results.updated) {
-    state.prices[q.ticker] = {
-      price: q.price,
-      at: new Date().toISOString(),
-      source: `${q.provider === 'yahoo' ? 'Yahoo' : 'Stooq'}${q.date ? ` · ${q.date}` : ''}`,
-    };
-    for (const trade of openTrades().filter((t) => t.ticker === q.ticker)) {
-      state.highs[trade.id] = Math.max(state.highs[trade.id] ?? trade.entryPrice, q.price);
-    }
-  }
-  if (results.updated.length) {
-    await state.repo.setSetting('prices', state.prices);
-    await state.repo.setSetting('priceHighs', state.highs);
-  }
-  await state.repo.setSetting('lastPriceSync', new Date().toISOString());
+  for (const q of results.updated) await saveQuote(q.ticker, q);
 
   state.priceSync = null;
-  if (auto) render();
-  else if (results.failed.length) openPriceSheet(results.failed.map((x) => x.ticker));
-  else toast(summarize(results));
+  if (manualFallback && results.failed.length) openPriceSheet(results.failed.map((x) => x.ticker));
+  else if (showProgress) toast(summarize(results));
+  else render();
   return results;
 }
