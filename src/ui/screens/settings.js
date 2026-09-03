@@ -1,21 +1,18 @@
-/**
- * Settings.
- *
- * Account, backup, data. The backup section is first because it is the only
- * thing here that can cost the trader something if ignored.
- */
+/** Settings: backup, account, market snapshots, appearance, data. */
 
 import { ACTIONS } from '../registry.js';
 import { state, setSetting, applyTheme, render, toast, refresh } from '../app.js';
 import { PRESETS } from '../../core/stopRules.js';
 import { serialize, restore } from '../../data/backup.js';
 import { autoBackup, chooseBackupFolder, hasFileSystemAccess } from '../../data/browserBackup.js';
-import { dollars, shortDate, esc } from '../format.js';
+import { getTwelveDataKey, setTwelveDataKey } from '../../data/marketData.js';
+import { shortDate, esc } from '../format.js';
 
 const ACTIVE_RULES = ['discretionary', 'ladderClassic'];
 
 export function renderSettings(s) {
   const last = s.draft.lastBackup;
+  const quoteKey = getTwelveDataKey();
 
   return `
     <div class="section-title"><span class="label">Backup</span></div>
@@ -45,8 +42,7 @@ export function renderSettings(s) {
     <div class="card">
       <div class="field">
         <label class="label" for="s-equity">Account size</label>
-        <input id="s-equity" inputmode="decimal" data-action-blur value="${s.settings.equity}"
-               data-set="equity">
+        <input id="s-equity" inputmode="decimal" data-action-blur value="${s.settings.equity}" data-set="equity">
       </div>
       <div class="field">
         <label class="label" for="s-risk">Default risk per trade (%)</label>
@@ -69,15 +65,39 @@ export function renderSettings(s) {
       </p>
     </div>
 
-    <div class="section-title"><span class="label">Prices</span></div>
+    <div class="section-title"><span class="label">Price snapshots</span></div>
     <div class="card">
-      <label class="switch">
-        <input type="checkbox" data-set="autoPrices" ${s.settings.autoPrices ? 'checked' : ''}>
-        <span>Fetch prices when the app opens</span>
-      </label>
+      <div class="field">
+        <label class="label" for="s-twelve-key">Twelve Data API key</label>
+        <input id="s-twelve-key" type="password" autocomplete="off" spellcheck="false"
+               value="${esc(quoteKey)}" placeholder="Optional API key">
+      </div>
+      <div class="btn-row">
+        <button class="btn" data-action="saveTwelveKey">${quoteKey ? 'Update key' : 'Save key'}</button>
+        ${quoteKey ? '<button class="btn" data-action="clearTwelveKey">Clear</button>' : ''}
+      </div>
       <p class="muted" style="margin:var(--sp-3) 0 0;font-size:var(--step--1)">
-        The app quietly tries two public sources for open positions. If neither is available,
-        manual entry remains the fallback without error messages.
+        Twelve Data is tried first when a key is saved, then Yahoo. If neither works, manual entry stays available.
+        Quotes are snapshots only — no streaming, polling or automatic refresh on app launch.
+      </p>
+      <p class="muted" style="margin:var(--sp-2) 0 0;font-size:var(--step--1)">
+        The key stays only in this browser and is not included in journal backups or exports.
+      </p>
+    </div>
+
+    <div class="section-title"><span class="label">Market hours</span></div>
+    <div class="card">
+      <div class="chips">
+        ${['regular', 'extended']
+          .map(
+            (v) =>
+              `<button class="chip" data-action="setMarketHours" data-v="${v}"
+                       aria-pressed="${s.settings.marketHours === v}">${v === 'regular' ? 'Regular' : 'Extended'}</button>`
+          )
+          .join('')}
+      </div>
+      <p class="muted" style="margin:var(--sp-3) 0 0;font-size:var(--step--1)">
+        Regular is 09:30–16:00 New York time. Extended adds pre-market and after-hours to the Today clock.
       </p>
     </div>
 
@@ -107,7 +127,7 @@ export function renderSettings(s) {
     </div>
 
     <p class="muted" style="text-align:center;margin-top:var(--sp-6);font-size:var(--step--1)">
-      Everything is stored on this device. Nothing is sent anywhere.
+      Trading history is stored on this device. Nothing is sent anywhere except quote requests you explicitly trigger.
     </p>`;
 }
 
@@ -129,6 +149,24 @@ ACTIONS.setTheme = async (el) => {
   await setSetting('theme', el.dataset.v);
   applyTheme();
   render();
+};
+
+ACTIONS.setMarketHours = async (el) => {
+  const value = el.dataset.v === 'extended' ? 'extended' : 'regular';
+  await setSetting('marketHours', value);
+  render();
+};
+
+ACTIONS.saveTwelveKey = () => {
+  const value = document.getElementById('s-twelve-key')?.value ?? '';
+  setTwelveDataKey(value);
+  toast(value.trim() ? 'API key saved on this device' : 'API key cleared');
+};
+
+ACTIONS.clearTwelveKey = () => {
+  setTwelveDataKey('');
+  render();
+  toast('API key cleared');
 };
 
 ACTIONS.chooseFolder = async () => {
@@ -162,11 +200,6 @@ ACTIONS.exportJson = async () => {
   toast('Exported');
 };
 
-/**
- * Restore asks which mode, because the two are not interchangeable and the
- * destructive one must never be the default. Replace wipes what is here;
- * merge unions by event id and is safe to run twice.
- */
 ACTIONS.importJson = () => {
   const input = document.createElement('input');
   input.type = 'file';
