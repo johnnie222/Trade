@@ -9,9 +9,11 @@ import { price as fmtPrice, dollars, pct, esc } from '../format.js';
 
 const SETUPS = ['Breakout', 'Pullback', 'Support Bounce', 'Trend Continuation', 'Gap', 'Reversal', 'Base Breakout'];
 const EMOTIONS = ['Calm', 'Confident', 'FOMO', 'Unsure'];
-const ACTIVE_RULES = ['discretionary', 'ladderClassic'];
+const REFERENCE_TYPES = ['Support', 'Breakout', 'Reclaim', 'Channel', 'Pivot', 'Other'];
+const LEADER_STATUSES = ['Established Leader', 'Emerging Leader', 'Neutral / Laggard'];
+const ACTIVE_RULES = ['structureManaged', 'discretionary', 'ladderClassic'];
 
-const activeRule = (key) => (ACTIVE_RULES.includes(key) ? key : 'ladderClassic');
+const activeRule = (key) => (ACTIVE_RULES.includes(key) ? key : 'structureManaged');
 
 const draft = () => (state.draft.new ??= {
   ticker: '',
@@ -21,7 +23,12 @@ const draft = () => (state.draft.new ??= {
   setup: null,
   emotion: null,
   rule: activeRule(state.settings.defaultRule),
+  referenceType: null,
+  referencePrice: '',
+  atr: '',
+  leaderStatus: null,
   thesis: '',
+  setupInvalidation: '',
   invalidation: '',
 });
 
@@ -34,6 +41,8 @@ export function calc(d, settings) {
   const entry = numOrNull(d.entry);
   const stop = numOrNull(d.stop);
   const qty = numOrNull(d.qty);
+  const referencePrice = numOrNull(d.referencePrice);
+  const atr = numOrNull(d.atr);
   if (entry == null || stop == null) return { ready: false };
   if (stop >= entry) return { ready: false, error: 'Stop must be below entry.' };
 
@@ -55,6 +64,12 @@ export function calc(d, settings) {
     positionValue: qty ? entry * qty : null,
     suggestedQty: Math.floor(maxRisk / rps),
     maxRisk,
+    referencePrice,
+    atr,
+    entryExtensionPct:
+      referencePrice != null && referencePrice > 0 ? (entry - referencePrice) / referencePrice : null,
+    entryExtensionAtr:
+      referencePrice != null && atr != null && atr > 0 ? (entry - referencePrice) / atr : null,
   };
 }
 
