@@ -8,7 +8,7 @@ import { autoBackup, chooseBackupFolder, hasFileSystemAccess } from '../../data/
 import { getTwelveDataKey, setTwelveDataKey } from '../../data/marketData.js';
 import { shortDate, esc } from '../format.js';
 
-const ACTIVE_RULES = ['discretionary', 'ladderClassic'];
+const ACTIVE_RULES = ['structureManaged', 'discretionary', 'ladderClassic'];
 
 export function renderSettings(s) {
   const last = s.draft.lastBackup;
