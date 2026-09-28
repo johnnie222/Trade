@@ -87,6 +87,15 @@ function calcPanel(c) {
         <div><span class="label">3R</span><span class="num">${fmtPrice(c.r3)}</span></div>
       </div>
       ${
+        c.entryExtensionPct != null
+          ? `<div class="kv" style="margin-top:var(--sp-3);border-top:1px solid var(--border);padding-top:var(--sp-3)">
+              <div><span class="label">Entry extension</span><span class="num">${c.entryExtensionPct >= 0 ? '+' : ''}${pct(c.entryExtensionPct, { dp: 2 })}</span></div>
+              <div><span class="label">From reference</span><span class="num">${fmtPrice(c.referencePrice)}</span></div>
+              ${c.entryExtensionAtr != null ? `<div><span class="label">In ATR</span><span class="num">${c.entryExtensionAtr >= 0 ? '+' : ''}${c.entryExtensionAtr.toFixed(2)} ATR</span></div>` : ''}
+            </div>`
+          : ''
+      }
+      ${
         c.risk != null
           ? `<div class="kv" style="margin-top:var(--sp-4);border-top:1px solid var(--border);padding-top:var(--sp-3)">
               <div><span class="label">Risk (1R)</span><span class="num r ${
@@ -154,7 +163,7 @@ export function renderNewTrade(s) {
         </select>
       </div>
 
-      <details ${d.setup || d.thesis ? 'open' : ''}>
+      <details ${d.setup || d.thesis || d.referencePrice || d.leaderStatus || d.setupInvalidation ? 'open' : ''}>
         <summary>Setup and thesis</summary>
         <div class="field">
           <span class="label">Setup</span>
@@ -167,13 +176,50 @@ export function renderNewTrade(s) {
           </div>
         </div>
         <div class="field">
+          <span class="label">Entry reference</span>
+          <div class="chips">
+            ${REFERENCE_TYPES.map(
+              (x) =>
+                `<button type="button" class="chip" data-action="pick" data-k="referenceType" data-v="${x}"
+                         aria-pressed="${d.referenceType === x}">${x}</button>`
+            ).join('')}
+          </div>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label class="label" for="f-reference">Reference level</label>
+            <input id="f-reference" inputmode="decimal" data-live="new" data-k="referencePrice"
+                   value="${esc(d.referencePrice)}" placeholder="e.g. 248.42">
+          </div>
+          <div class="field">
+            <label class="label" for="f-atr">ATR at entry</label>
+            <input id="f-atr" inputmode="decimal" data-live="new" data-k="atr"
+                   value="${esc(d.atr)}" placeholder="optional">
+          </div>
+        </div>
+        <div class="field">
+          <span class="label">Leadership</span>
+          <div class="chips">
+            ${LEADER_STATUSES.map(
+              (x) =>
+                `<button type="button" class="chip" data-action="pick" data-k="leaderStatus" data-v="${x}"
+                         aria-pressed="${d.leaderStatus === x}">${x}</button>`
+            ).join('')}
+          </div>
+        </div>
+        <div class="field">
           <label class="label" for="f-thesis">Why this trade</label>
           <textarea id="f-thesis" data-live="new" data-k="thesis" placeholder="What you expect to happen.">${esc(d.thesis)}</textarea>
         </div>
         <div class="field">
-          <label class="label" for="f-inval">What proves you wrong</label>
+          <label class="label" for="f-setup-inval">Setup fails if</label>
+          <textarea id="f-setup-inval" data-live="new" data-k="setupInvalidation"
+                    placeholder="What invalidates this specific entry or setup?">${esc(d.setupInvalidation)}</textarea>
+        </div>
+        <div class="field">
+          <label class="label" for="f-inval">Thesis fails if</label>
           <textarea id="f-inval" data-live="new" data-k="invalidation"
-                    placeholder="Not the stop price — the thing that kills the idea.">${esc(d.invalidation)}</textarea>
+                    placeholder="Not the stop price — the thing that kills the broader idea.">${esc(d.invalidation)}</textarea>
         </div>
       </details>
 
