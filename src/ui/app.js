@@ -38,7 +38,7 @@ export const state = {
   settings: {
     equity: 50000,
     riskPct: 1,
-    defaultRule: 'ladderClassic',
+    defaultRule: 'structureManaged',
     theme: 'system',
     marketHours: 'regular',
   },
