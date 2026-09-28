@@ -35,6 +35,11 @@ export const RuleType = {
 export const PRESETS = {
   discretionary: { type: RuleType.NONE, label: 'Manual — no rule' },
 
+  structureManaged: {
+    type: RuleType.NONE,
+    label: 'Structure-managed — no automatic R moves',
+  },
+
   beAt1R: {
     type: RuleType.LADDER,
     label: 'Breakeven at 1R, then manual',
