@@ -241,7 +241,7 @@ LIVE.new = (el) => {
   const k = el.dataset.k;
   d[k] = k === 'ticker' ? el.value.toUpperCase() : el.value;
 
-  if (['entry', 'stop', 'qty'].includes(k)) {
+  if (['entry', 'stop', 'qty', 'referencePrice', 'atr'].includes(k)) {
     const c = calc(d, state.settings);
     document.querySelector('.calc')?.outerHTML && replaceCalc(c);
     const btn = document.querySelector('[data-action="openTrade"]');
@@ -309,7 +309,12 @@ ACTIONS.openTrade = async () => {
         ticker: d.ticker.trim().toUpperCase(),
         setup: d.setup,
         entryEmotion: d.emotion,
+        referenceType: d.referenceType,
+        referencePrice: numOrNull(d.referencePrice),
+        atrAtEntry: numOrNull(d.atr),
+        leaderStatus: d.leaderStatus,
         thesis: d.thesis || null,
+        setupInvalidation: d.setupInvalidation || null,
         invalidation: d.invalidation || null,
         rule: d.rule,
       },
