@@ -28,9 +28,21 @@ const EXIT_REASONS = [
 
 const find = (id) => state.trades.find((t) => t.id === id);
 
+function entryExtension(t) {
+  if (!(t.referencePrice > 0) || !(t.entryPrice > 0)) return null;
+  const pctFromRef = (t.entryPrice - t.referencePrice) / t.referencePrice;
+  const atrFromRef = t.atrAtEntry > 0 ? (t.entryPrice - t.referencePrice) / t.atrAtEntry : null;
+  return { pctFromRef, atrFromRef };
+}
+
 function rulePanel(t, p) {
   if (!t.rule || t.rule === 'discretionary') return '';
   const preset = rule(t);
+  if (t.rule === 'structureManaged') {
+    return `<div class="card"><span class="label">Stop rule</span>
+      <p style="margin:var(--sp-2) 0 0">${esc(preset.label)}</p>
+      <p class="muted" style="margin:var(--sp-1) 0 0">R is measured, but it does not move the stop automatically. Raise it only when structure gives you a new level.</p></div>`;
+  }
   if (!p) {
     return `<div class="card"><span class="label">Stop rule</span>
       <p style="margin:var(--sp-2) 0 0">${esc(preset.label)}</p>
@@ -240,16 +252,23 @@ export function renderTradeDetail(s) {
     ${isOpen ? rulePanel(t, p) + managementPanel(t, p) : ''}
 
     ${
-      t.thesis || t.invalidation
-        ? `<div class="card">
-            ${t.thesis ? `<span class="label">Thesis</span><p style="margin:var(--sp-1) 0 var(--sp-3)">${esc(t.thesis)}</p>` : ''}
-            ${
-              t.invalidation
-                ? `<span class="label">Proves me wrong</span><p style="margin:var(--sp-1) 0 0">${esc(t.invalidation)}</p>`
-                : ''
-            }
-          </div>`
-        : ''
+      (() => {
+        const ext = entryExtension(t);
+        const hasContext =
+          t.thesis || t.setupInvalidation || t.invalidation || t.referencePrice || t.leaderStatus;
+        if (!hasContext) return '';
+        return `<div class="card">
+          ${t.leaderStatus ? `<span class="label">Leadership</span><p style="margin:var(--sp-1) 0 var(--sp-3)">${esc(t.leaderStatus)}</p>` : ''}
+          ${t.referencePrice ? `<span class="label">Entry reference</span>
+            <p style="margin:var(--sp-1) 0 var(--sp-3)">
+              ${t.referenceType ? esc(t.referenceType) + ' · ' : ''}${fmtPrice(t.referencePrice)}
+              ${ext ? ` · extension ${ext.pctFromRef >= 0 ? '+' : ''}${pct(ext.pctFromRef, { dp: 2 })}${ext.atrFromRef != null ? ` · ${ext.atrFromRef >= 0 ? '+' : ''}${ext.atrFromRef.toFixed(2)} ATR` : ''}` : ''}
+            </p>` : ''}
+          ${t.thesis ? `<span class="label">Thesis</span><p style="margin:var(--sp-1) 0 var(--sp-3)">${esc(t.thesis)}</p>` : ''}
+          ${t.setupInvalidation ? `<span class="label">Setup fails if</span><p style="margin:var(--sp-1) 0 var(--sp-3)">${esc(t.setupInvalidation)}</p>` : ''}
+          ${t.invalidation ? `<span class="label">Thesis fails if</span><p style="margin:var(--sp-1) 0 0">${esc(t.invalidation)}</p>` : ''}
+        </div>`;
+      })()
     }
 
     <div class="section-title"><span class="label">Stop history</span></div>
