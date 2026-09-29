@@ -749,6 +749,8 @@
 }
 
 /* Top-right overflow replaces a settings-only gear. */
+.topbar { z-index: 50; }
+
 .overflow-wrap {
   position: relative;
   flex: 0 0 auto;
