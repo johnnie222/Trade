@@ -1,18 +1,14 @@
 /**
- * Today: market context, portfolio state, then open trades.
- *
- * This screen stays operational rather than analytical. Daily market context is
- * useful here; volume, 52-week ranges and other research data belong deeper in
- * the trade detail screen.
+ * Today V9: operational triage.
+ * Open risk first, then positions split into At risk and Protected.
  */
 
 import { ACTIONS } from '../registry.js';
-import { state, openTrades, priceFor, logoFor, rule } from '../app.js';
-import { portfolioRisk, currentR, totalPnl, tradeStatusLabel, isProtected, openRisk, lockedIn } from '../../core/engine.js';
-import { evaluateStopRule } from '../../core/stopRules.js';
+import { state, openTrades, priceFor } from '../app.js';
+import { portfolioRisk, currentR, totalPnl, isProtected, openRisk, lockedIn } from '../../core/engine.js';
 import { priceAge } from '../../data/marketData.js';
 import { marketStatusHtml } from '../marketClock.js';
-import { rail, rval, dollars, price as fmtPrice, pct, tone, shortDate, daysBetween, esc } from '../format.js';
+import { dollars, price as fmtPrice, pct, esc } from '../format.js';
 
 const etTime = new Intl.DateTimeFormat('en-US', {
   timeZone: 'America/New_York',
@@ -36,124 +32,84 @@ function dailyMove(t, p) {
   };
 }
 
-function dailyText(move) {
-  if (!move) return '—';
-  return `${dollars(move.dollars)} (${signedPct(move.percent)})`;
+function rTone(r) {
+  if (r == null || !Number.isFinite(r) || Math.abs(r) < 0.1) return 'neutral';
+  return r > 0 ? 'pos' : 'neg';
 }
 
-function ruleFlag(t) {
+function rText(r) {
+  if (r == null || !Number.isFinite(r)) return '—';
+  return `${r >= 0 ? '+' : ''}${r.toFixed(2)}R`;
+}
+
+function stopDistance(t) {
   const p = priceFor(t.ticker);
-  if (!p || !t.rule || t.rule === 'discretionary') return null;
-  const r = evaluateStopRule(rule(t), {
-    entryPrice: t.entryPrice,
-    riskPerShare: t.riskPerShare,
-    activeStop: t.activeStop,
-    highestClose: state.highs[t.id] ?? p.price,
-    currentPrice: p.price,
-  });
-  return r.shouldRaise ? r : null;
+  if (!p || !(t.riskPerShare > 0)) return Infinity;
+  return (p.price - t.activeStop) / t.riskPerShare;
 }
 
-function freshness(p) {
-  if (!p?.at) return '';
-  const age = priceAge(p);
-  const source = esc(String(p.source ?? 'Market data').split(' · ')[0]);
-  const time = etTime.format(new Date(p.at));
-  return `<span class="stamp ${age?.level === 'stale' ? 'warn' : ''}">Updated ${time} ET <span class="stamp-age">· ${source}</span></span>`;
+function neutralRiskRail(t, p) {
+  const rps = t.riskPerShare;
+  if (!p || !(rps > 0)) return '';
+  const stop = t.activeStop;
+  const entry = t.entryPrice;
+  const end = entry + 2 * rps;
+  const span = end - stop;
+  if (!(span > 0)) return '';
+
+  const nowPct = Math.max(0, Math.min(100, ((p.price - stop) / span) * 100));
+  const r = currentR(t, p.price);
+  return `
+    <div class="v9-rail" aria-label="R range from stop to 2R">
+      <div class="v9-rail-track"></div>
+      <span class="v9-rail-tick" style="left:0%"></span>
+      <span class="v9-rail-tick" style="left:33.333%"></span>
+      <span class="v9-rail-tick" style="left:66.667%"></span>
+      <span class="v9-rail-tick" style="left:100%"></span>
+      <span class="v9-rail-now ${rTone(r)}" style="left:${nowPct}%"></span>
+      <span class="v9-rail-label edge-left" style="left:0%">stop</span>
+      <span class="v9-rail-label" style="left:33.333%">entry</span>
+      <span class="v9-rail-label" style="left:66.667%">1R</span>
+      <span class="v9-rail-label edge-right" style="left:100%">2R</span>
+    </div>`;
 }
 
-function cardStatus(t, p, r) {
-  if (!p) return 'Open';
-  if (tradeStatusLabel(t, p.price) === 'Near Stop') return 'Near Stop';
-  if (Number.isFinite(r) && r >= 3) return '3R+';
-  if (Number.isFinite(r) && r >= 2) return '2R+';
-  if (Number.isFinite(r) && r >= 1) return '1R+';
-  if (isProtected(t)) return 'Protected';
-  return 'Open';
-}
-
-function tickerIdentity(t) {
-  const logo = logoFor(t.ticker);
-  return `<div class="ticker-identity">
-    ${
-      logo
-        ? `<span class="ticker-logo"><img src="${esc(logo)}" alt="" loading="lazy" onerror="this.closest('.ticker-logo')?.remove()"></span>`
-        : ''
-    }
-    <div><span class="ticker">${esc(t.ticker)}</span><span class="muted ticker-setup">${esc(t.setup ?? 'Untagged')}</span></div>
-  </div>`;
-}
-
-function tradeCard(t) {
+function atRiskRow(t) {
   const p = priceFor(t.ticker);
   const r = p ? currentR(t, p.price) : null;
-  const pnl = p ? totalPnl(t, p.price) : null;
-  const status = cardStatus(t, p, r);
-  const flag = ruleFlag(t);
-  const statusTone = status === 'Near Stop' ? 'warn' : status.endsWith('R+') || isProtected(t) ? 'pos' : '';
-  const chg = p ? (p.price - t.entryPrice) / t.entryPrice : null;
-  const today = dailyMove(t, p);
-
+  const cash = p ? totalPnl(t, p.price) : null;
+  const below = p ? p.price < t.activeStop : false;
   return `
-    <article class="card trade-card" data-go="trade/${t.id}" role="link" tabindex="0">
-      <div class="card-head trade-card-head">
-        ${tickerIdentity(t)}
-        <span class="pill ${statusTone}">${status}</span>
+    <button class="risk-row" data-go="trade/${t.id}">
+      <div class="risk-row-top">
+        <span>
+          <strong class="ticker">${esc(t.ticker)}</strong>
+          <span class="risk-sub ${below ? 'warn' : ''}">
+            ${below ? 'Below stop' : 'stop'} ${fmtPrice(t.activeStop)}
+            ${cash == null ? '' : ` · ${dollars(cash)}`}
+          </span>
+        </span>
+        <span class="r-chip ${rTone(r)}">${rText(r)}</span>
+        <span class="trade-chevron">›</span>
       </div>
-
-      <div class="headline">
-        <span class="r ${tone(r)}">${rval(r)}</span>
-        <span class="headline-sub ${tone(pnl)}">${dollars(pnl)}</span>
-      </div>
-
-      ${rail({
-        entry: t.entryPrice,
-        current: p?.price,
-        riskPerShare: t.riskPerShare,
-      })}
-
-      <div class="kv today-kv">
-        <div><span class="label">Now</span><span class="num">${fmtPrice(p?.price)}</span></div>
-        <div><span class="label">Change</span><span class="num ${tone(chg)}">${
-          chg == null ? '&mdash;' : `${chg >= 0 ? '+' : ''}${(chg * 100).toFixed(2)}%`
-        }</span></div>
-        <div><span class="label">Stop</span><span class="num ${isProtected(t) ? 'pos' : ''}">${fmtPrice(
-          t.activeStop
-        )}</span></div>
-        <div><span class="label">Today</span><span class="num combo ${tone(today?.dollars)}">${dailyText(today)}</span></div>
-        <div><span class="label">${isProtected(t) ? 'Locked in' : 'At risk'}</span><span class="num ${
-          isProtected(t) ? 'pos' : ''
-        }">${isProtected(t) ? dollars(lockedIn(t)) : dollars(openRisk(t), { sign: false })}</span></div>
-      </div>
-
-      ${
-        flag
-          ? `<div class="banner warn">
-               <span>Your rule says <b class="num">${fmtPrice(flag.target)}</b></span>
-               <span class="muted">${esc(flag.triggeredBy)}</span>
-             </div>`
-          : ''
-      }
-
-      <div class="card-foot">
-        <span class="muted">Day ${daysBetween(t.openedAt)} &middot; ${t.qty} shares</span>
-        ${p ? freshness(p) : '<span class="stamp warn">No price yet</span>'}
-      </div>
-    </article>`;
+      ${neutralRiskRail(t, p)}
+    </button>`;
 }
 
-const VERB = {
-  OPEN: (p) => `opened ${p.qty} @ ${fmtPrice(p.price)}`,
-  ADD: (p) => `added ${p.qty} @ ${fmtPrice(p.price)}`,
-  TRIM: (p) => `trimmed ${p.qty} @ ${fmtPrice(p.price)}`,
-  STOP_CHANGE: (p) => `stop &rarr; ${fmtPrice(p.to)}`,
-  RULE_OVERRIDE: () => 'skipped the stop rule',
-  CLOSE: (p) => `closed @ ${fmtPrice(p.price)}`,
-  NOTE: () => 'note',
-  SPLIT: (p) => `${p.numerator}:${p.denominator} split`,
-  DAILY_NOTE: () => 'daily note',
-  TRADE_EDIT: (p) => `corrected ${p.field}`,
-};
+function protectedRow(t) {
+  const locked = Math.max(0, lockedIn(t));
+  return `
+    <button class="risk-row protected-row" data-go="trade/${t.id}">
+      <div class="risk-row-top">
+        <span>
+          <strong class="ticker">${esc(t.ticker)}</strong>
+          <span class="risk-sub pos">+${dollars(locked, { sign: false }).replace('$', '$')} locked · stop ${fmtPrice(t.activeStop)}</span>
+        </span>
+        <span class="protected-value">${dollars(locked)}</span>
+        <span class="trade-chevron">›</span>
+      </div>
+    </button>`;
+}
 
 function syncBar(sync) {
   if (!sync?.running) return '';
@@ -161,8 +117,40 @@ function syncBar(sync) {
   return `
     <div class="sync" role="status">
       <div class="sync-bar"><div class="sync-fill" style="width:${done}%"></div></div>
-      <span class="muted">Fetching ${esc(sync.ticker ?? '')} &middot; ${sync.done}/${sync.total}</span>
+      <span class="muted">Fetching ${esc(sync.ticker ?? '')} · ${sync.done}/${sync.total}</span>
     </div>`;
+}
+
+function priceStamp(open) {
+  const quotes = open.map((t) => priceFor(t.ticker)).filter((p) => p?.at);
+  if (!quotes.length) return 'Prices not updated yet';
+  const latest = quotes.sort((a, b) => new Date(b.at) - new Date(a.at))[0];
+  const source = esc(String(latest.source ?? 'Market data').split(' · ')[0]);
+  const age = priceAge(latest);
+  return `Prices as of ${etTime.format(new Date(latest.at))} ET · ${source}${age?.level === 'stale' ? ' · stale' : ''}`;
+}
+
+function breachAlert(atRisk) {
+  const breached = atRisk
+    .map((t) => {
+      const p = priceFor(t.ticker);
+      return p && p.price < t.activeStop ? { t, p, r: currentR(t, p.price), pnl: totalPnl(t, p.price) } : null;
+    })
+    .filter(Boolean)
+    .sort((a, b) => (a.r ?? 0) - (b.r ?? 0));
+
+  if (!breached.length) return '';
+  const x = breached[0];
+  const planned = x.t.R;
+  return `
+    <section class="card stop-alert">
+      <div class="stop-alert-icon" aria-hidden="true">!</div>
+      <div>
+        <strong>${esc(x.t.ticker)} is trading below its stop</strong>
+        <p>Open loss ${dollars(Math.abs(x.pnl), { sign: false })} is past its planned ~${dollars(planned, { sign: false })} risk (${rText(x.r)}). Record the exit or review the stop.</p>
+        <button class="text-action" data-go="trade/${x.t.id}">Review ${esc(x.t.ticker)}</button>
+      </div>
+    </section>`;
 }
 
 export function renderHome(s) {
@@ -179,88 +167,83 @@ export function renderHome(s) {
       </div>`;
   }
 
+  if (!open.length) {
+    return `
+      ${marketStatusHtml(s.settings.marketHours)}
+      <section class="card hero v9-risk-hero">
+        <span class="label">Open risk</span>
+        <div class="open-risk-number">$0</div>
+        <p class="muted">No open positions. The account is flat.</p>
+      </section>`;
+  }
+
+  const atRisk = open.filter((t) => !isProtected(t)).sort((a, b) => stopDistance(a) - stopDistance(b));
+  const protectedTrades = open.filter(isProtected);
   const unrealized = open.reduce((a, t) => {
     const p = priceFor(t.ticker);
     return a + (p ? totalPnl(t, p.price) : 0);
   }, 0);
-  const locked = open.reduce((a, t) => a + Math.max(0, lockedIn(t)), 0);
-  const protectedCount = open.filter(isProtected).length;
-  const atRiskCount = open.length - protectedCount;
+  const locked = protectedTrades.reduce((a, t) => a + Math.max(0, lockedIn(t)), 0);
 
   const daily = open.map((t) => dailyMove(t, priceFor(t.ticker)));
-  const hasCompleteDaily = open.length > 0 && daily.every(Boolean);
-  const portfolioTodayDollars = hasCompleteDaily ? daily.reduce((a, x) => a + x.dollars, 0) : null;
-  const portfolioDailyBase = hasCompleteDaily ? daily.reduce((a, x) => a + x.base, 0) : null;
-  const portfolioTodayPct = portfolioDailyBase ? portfolioTodayDollars / portfolioDailyBase : null;
-  const portfolioToday =
-    portfolioTodayDollars == null
-      ? '—'
-      : `${dollars(portfolioTodayDollars)} (${signedPct(portfolioTodayPct)})`;
+  const hasCompleteDaily = daily.every(Boolean);
+  const sessionDollars = hasCompleteDaily ? daily.reduce((a, x) => a + x.dollars, 0) : null;
+  const sessionBase = hasCompleteDaily ? daily.reduce((a, x) => a + x.base, 0) : null;
+  const sessionPct = sessionBase ? sessionDollars / sessionBase : null;
+
+  const segments = [
+    ...atRisk.map(() => '<span class="risk-segment at-risk"></span>'),
+    ...protectedTrades.map(() => '<span class="risk-segment protected"></span>'),
+  ].join('');
 
   return `
     ${marketStatusHtml(s.settings.marketHours)}
+    ${breachAlert(atRisk)}
 
-    <section class="card hero portfolio-hero">
-      <div class="card-head portfolio-head">
-        <span class="label">Portfolio</span>
-        <span class="muted">${open.length} position${open.length === 1 ? '' : 's'}</span>
+    <section class="card hero v9-risk-hero">
+      <div class="v9-risk-head">
+        <div>
+          <span class="label">Open risk</span>
+          <div class="open-risk-line">
+            <strong class="open-risk-number">${dollars(risk.total, { sign: false })}</strong>
+            <span class="muted">${pct(risk.total / s.settings.equity, { dp: 2 })} of account</span>
+          </div>
+        </div>
+        <button class="chip" data-action="syncPrices" ${s.priceSync?.running ? 'disabled' : ''}>
+          ${s.priceSync?.running ? 'Updating…' : 'Update prices'}
+        </button>
       </div>
 
-      <div class="portfolio-kpis">
-        <div><span class="label">Open gain/loss</span><span class="num r ${tone(unrealized)}">${dollars(unrealized)}</span></div>
-        <div><span class="label">Today</span><span class="num r today-combo ${tone(portfolioTodayDollars)}">${portfolioToday}</span></div>
-        <div><span class="label">Locked in</span><span class="num r ${tone(locked)}">${dollars(locked)}</span></div>
+      <div class="risk-segments" aria-label="${atRisk.length} at risk, ${protectedTrades.length} protected">${segments}</div>
+      <div class="risk-counts">
+        <span class="warn">${atRisk.length} at risk</span>
+        <span class="pos">${protectedTrades.length} protected</span>
       </div>
 
-      <div class="portfolio-risk-footer">
-        <div class="portfolio-risk-line">
-          <span class="label">Portfolio risk</span>
-          <span class="num portfolio-risk-value">${dollars(risk.total, { sign: false })} <span class="muted">· ${pct(
-            risk.total / s.settings.equity,
-            { dp: 2 }
-          )} of account</span></span>
-        </div>
-        <div class="risk-state">
-          <span>${atRiskCount} at risk</span><span class="risk-dot">·</span><span class="pos">${protectedCount} protected</span>
-        </div>
-        <p class="fineprint">Assumes stops fill at their price. Gaps may exceed risk.</p>
+      <div class="v9-portfolio-kpis">
+        <div><span class="label">Open P&amp;L</span><strong class="${unrealized > 0 ? 'pos' : unrealized < 0 ? 'neg' : ''}">${dollars(unrealized)}</strong></div>
+        <div><span class="label">Locked in</span><strong class="pos">${dollars(locked)}</strong></div>
+        <div><span class="label">Last session</span><strong class="${sessionDollars > 0 ? 'pos' : sessionDollars < 0 ? 'neg' : ''}">
+          ${sessionDollars == null ? '—' : `${dollars(sessionDollars)} ${signedPct(sessionPct)}`}
+        </strong></div>
       </div>
     </section>
 
     ${syncBar(s.priceSync)}
 
-    <div class="section-title">
-      <span class="label">Open</span>
-      <button class="chip" data-action="syncPrices" ${s.priceSync?.running ? 'disabled' : ''}>
-        ${s.priceSync?.running ? 'Updating…' : 'Update prices'}
-      </button>
+    <div class="section-title v9-group-title">
+      <span>At risk</span>
+      <span class="muted">closest to stop first</span>
     </div>
-    ${
-      open.length
-        ? open.map(tradeCard).join('')
-        : '<div class="card"><p class="muted" style="margin:0">Nothing open. The account is flat.</p></div>'
-    }
+    ${atRisk.length ? `<div class="card risk-list">${atRisk.map(atRiskRow).join('')}</div>` : '<div class="card"><p class="muted" style="margin:0">No positions currently at risk.</p></div>'}
 
-    <div class="section-title">
-      <span class="label">Recent</span>
-      <button class="chip" data-go="log">All</button>
+    <div class="section-title v9-group-title">
+      <span>Protected</span>
+      <span class="muted">stop above entry</span>
     </div>
-    <div class="card">
-      <div class="timeline">
-        ${s.log
-          .slice(0, 6)
-          .map(
-            (e) => `<div class="tl-item ${e.type === 'RULE_OVERRIDE' ? 'skip' : ''}">
-              <div class="tl-when">${shortDate(e.at)}</div>
-              <div class="tl-what">
-                ${e.ticker ? `<span class="ticker sm">${esc(e.ticker)}</span> ` : ''}
-                ${VERB[e.type]?.(e.payload ?? {}) ?? e.type.toLowerCase()}
-              </div>
-            </div>`
-          )
-          .join('')}
-      </div>
-    </div>`;
+    ${protectedTrades.length ? `<div class="card risk-list">${protectedTrades.map(protectedRow).join('')}</div>` : '<div class="card"><p class="muted" style="margin:0">No protected positions yet.</p></div>'}
+
+    <p class="price-stamp">${priceStamp(open)}</p>`;
 }
 
 ACTIONS.syncPrices = async () => {
