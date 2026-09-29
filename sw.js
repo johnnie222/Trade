@@ -3,7 +3,7 @@
  * Bump VERSION on every release so installed phones cannot retain stale UI.
  */
 
-const VERSION = 'tj-v9';
+const VERSION = 'tj-v9-1';
 const SHELL = [
   './',
   './index.html',
