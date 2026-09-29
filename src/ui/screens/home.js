@@ -48,6 +48,11 @@ function stopDistance(t) {
   return (p.price - t.activeStop) / t.riskPerShare;
 }
 
+function stopBreached(t) {
+  const p = priceFor(t.ticker);
+  return Boolean(p && p.price < t.activeStop);
+}
+
 function neutralRiskRail(t, p) {
   const rps = t.riskPerShare;
   if (!p || !(rps > 0)) return '';
@@ -177,8 +182,10 @@ export function renderHome(s) {
       </section>`;
   }
 
-  const atRisk = open.filter((t) => !isProtected(t)).sort((a, b) => stopDistance(a) - stopDistance(b));
-  const protectedTrades = open.filter(isProtected);
+  const atRisk = open
+    .filter((t) => !isProtected(t) || stopBreached(t))
+    .sort((a, b) => stopDistance(a) - stopDistance(b));
+  const protectedTrades = open.filter((t) => isProtected(t) && !stopBreached(t));
   const unrealized = open.reduce((a, t) => {
     const p = priceFor(t.ticker);
     return a + (p ? totalPnl(t, p.price) : 0);
