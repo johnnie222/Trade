@@ -4,8 +4,8 @@
  */
 
 import { ACTIONS } from '../registry.js';
-import { state, openTrades, priceFor } from '../app.js';
-import { portfolioRisk, currentR, totalPnl, isProtected, openRisk, lockedIn } from '../../core/engine.js';
+import { openTrades, priceFor } from '../app.js';
+import { portfolioRisk, currentR, totalPnl, isProtected, lockedIn } from '../../core/engine.js';
 import { priceAge } from '../../data/marketData.js';
 import { marketStatusHtml } from '../marketClock.js';
 import { dollars, price as fmtPrice, pct, esc } from '../format.js';
@@ -108,7 +108,7 @@ function protectedRow(t) {
       <div class="risk-row-top">
         <span>
           <strong class="ticker">${esc(t.ticker)}</strong>
-          <span class="risk-sub pos">+${dollars(locked, { sign: false }).replace('$', '$')} locked · stop ${fmtPrice(t.activeStop)}</span>
+          <span class="risk-sub pos">+${dollars(locked, { sign: false })} locked · stop ${fmtPrice(t.activeStop)}</span>
         </span>
         <span class="protected-value">${dollars(locked)}</span>
         <span class="trade-chevron">›</span>
