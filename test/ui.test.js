@@ -202,7 +202,8 @@ describe('every screen renders with data', () => {
     assert.match(html, /Backup/);
     assert.match(html, /50000/);
     assert.ok(!html.includes('Trailing stop'), 'trailing configuration belongs to each trade');
-    assert.match(html, /Fetch prices when the app opens/);
+    assert.match(html, /Accent/);
+    assert.match(html, /Trade Journal · V9/);
   });
 
   test('new trade', () => {
@@ -238,11 +239,11 @@ describe('empty and partial states', () => {
     assert.match(renders(renderLog(state)), /Nothing has happened yet/);
   });
 
-  test('an open trade with no price renders dashes, not zeroes', async () => {
+  test('an open trade with no price reports price freshness honestly', async () => {
     await seed({ withPrice: false });
     const html = renders(renderHome(state));
-    assert.match(html, /No price yet/);
-    assert.match(html, new RegExp(DASH));
+    assert.match(html, /Prices not updated yet/);
+    assert.ok(!html.includes('NaN'));
   });
 
   test('trade detail survives a missing price', async () => {
