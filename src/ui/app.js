@@ -30,7 +30,7 @@ import { renderLog } from './screens/log.js';
 import { renderStats } from './screens/stats.js';
 import { renderSettings } from './screens/settings.js';
 
-export const APP_VERSION = 'V9';
+export const APP_VERSION = 'V9.1';
 export const APP_BUILD = '2026.09.29';
 
 export const state = {
@@ -126,6 +126,7 @@ function parseRoute() {
 }
 
 export function go(hash) {
+  state.draft.overflowOpen = false;
   location.hash = hash;
 }
 
@@ -370,10 +371,23 @@ function tabs() {
 export function render() {
   const screen = SCREENS[state.route.name] ?? SCREENS.home;
   const app = document.getElementById('app');
+  const overflowOpen = Boolean(state.draft.overflowOpen);
   app.innerHTML = `
     <header class="topbar">
       <h1>${screen.title || ''}</h1>
-      <button class="chip" data-go="settings" aria-label="Settings">⚙</button>
+      <div class="overflow-wrap">
+        <button class="overflow-trigger" data-action="toggleOverflow" aria-label="More options"
+                aria-expanded="${overflowOpen}">⋮</button>
+        ${
+          overflowOpen
+            ? `<button class="overflow-backdrop" data-action="closeOverflow" aria-label="Close menu"></button>
+               <div class="overflow-menu" role="menu">
+                 <button data-go="settings" role="menuitem">Settings</button>
+                 <button data-go="log" role="menuitem">Activity log</button>
+               </div>`
+            : ''
+        }
+      </div>
     </header>
     <main class="screen">${screen.render(state)}</main>
     ${tabs()}
@@ -437,6 +451,15 @@ document.addEventListener('input', (e) => {
 });
 
 export { ACTIONS, LIVE };
+
+ACTIONS.toggleOverflow = () => {
+  state.draft.overflowOpen = !state.draft.overflowOpen;
+  render();
+};
+ACTIONS.closeOverflow = () => {
+  state.draft.overflowOpen = false;
+  render();
+};
 
 ACTIONS.openPriceSheet = (el) => openPriceSheet(el.dataset.ticker ? [el.dataset.ticker] : null);
 ACTIONS.closePriceSheet = () => {
