@@ -30,6 +30,9 @@ import { renderLog } from './screens/log.js';
 import { renderStats } from './screens/stats.js';
 import { renderSettings } from './screens/settings.js';
 
+export const APP_VERSION = 'V9';
+export const APP_BUILD = '2026.09.29';
+
 export const state = {
   route: { name: 'home', params: {} },
   repo: null,
@@ -40,6 +43,7 @@ export const state = {
     riskPct: 1,
     defaultRule: 'structureManaged',
     theme: 'system',
+    accent: 'blue',
     marketHours: 'regular',
   },
   /** { running, done, total, ticker } while the explicit price queue is working. */
@@ -90,7 +94,7 @@ export async function boot() {
 }
 
 async function loadSettings() {
-  const keys = ['equity', 'riskPct', 'defaultRule', 'theme', 'marketHours'];
+  const keys = ['equity', 'riskPct', 'defaultRule', 'theme', 'accent', 'marketHours'];
   for (const k of keys) {
     const v = await state.repo.getSetting(k, state.settings[k]);
     if (v != null) state.settings[k] = v;
@@ -109,6 +113,7 @@ export function applyTheme() {
   const t = state.settings.theme;
   if (t === 'system') document.documentElement.removeAttribute('data-theme');
   else document.documentElement.setAttribute('data-theme', t);
+  document.documentElement.setAttribute('data-accent', state.settings.accent ?? 'blue');
 }
 
 /* ------------------------------------------------------------------ */
@@ -337,23 +342,29 @@ const SCREENS = {
   settings: { title: 'Settings', render: renderSettings },
 };
 
+const ICONS = {
+  home: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg>',
+  trades: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 6h13M7 12h13M7 18h13"></path><circle cx="4" cy="6" r="1"></circle><circle cx="4" cy="12" r="1"></circle><circle cx="4" cy="18" r="1"></circle></svg>',
+  stats: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"></path></svg>',
+};
+
 const TABS = [
-  { id: 'home', glyph: '◧', label: 'Today' },
-  { id: 'trades', glyph: '≡', label: 'Trades' },
-  { id: 'new', glyph: '+', label: '', cls: 'new' },
-  { id: 'log', glyph: '⋮', label: 'Log' },
-  { id: 'stats', glyph: '◔', label: 'Stats' },
+  { id: 'home', label: 'Today' },
+  { id: 'trades', label: 'Trades' },
+  { id: 'stats', label: 'Stats' },
 ];
 
 function tabs() {
-  const active = state.route.name === 'trade' ? 'trades' : state.route.name;
-  return `<nav class="tabs">${TABS.map(
-    (t) => `<button class="${t.cls ?? ''}" data-go="${t.id}" ${
-      active === t.id ? 'aria-current="page"' : ''
-    } aria-label="${t.label || 'New trade'}">
-        <span class="glyph">${t.glyph}</span>${t.label ? `<span>${t.label}</span>` : ''}
-      </button>`
-  ).join('')}</nav>`;
+  const active = ['trade', 'log'].includes(state.route.name) ? 'trades' : state.route.name;
+  return `
+    <nav class="tabs">
+      ${TABS.map(
+        (t) => `<button data-go="${t.id}" ${active === t.id ? 'aria-current="page"' : ''} aria-label="${t.label}">
+          <span class="glyph">${ICONS[t.id]}</span><span>${t.label}</span>
+        </button>`
+      ).join('')}
+    </nav>
+    <button class="fab-new" data-go="new" aria-label="New trade">+</button>`;
 }
 
 export function render() {
