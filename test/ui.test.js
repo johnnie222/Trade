@@ -92,42 +92,26 @@ const renders = (html) => {
 describe('every screen renders with data', () => {
   before(() => seed());
 
-  test('home', () => {
+  test('home is risk-first and separates protected positions', () => {
     const html = renders(renderHome(state));
-    assert.match(html, /DELL/);
+    assert.match(html, /Open risk/);
     assert.match(html, /At risk/);
-    assert.match(html, /\+2\.40R/, 'DELL at 112 on a 5-point risk is +2.4R');
-  });
-
-  test('home surfaces the stop rule when it is triggered', () => {
-    // Highest close 112 is 2.4R, so the ladder wants the stop at 1R = 105.
-    const html = renderHome(state);
-    assert.match(html, /Your rule says/);
-    assert.match(html, /105\.00/);
-    assert.match(html, /2R &rarr; 1R|2R → 1R/);
-  });
-
-  test('home shows what R is worth in dollars', () => {
-    const html = renderHome(state);
-    assert.match(html, />1R</, 'the R label');
-    assert.match(html, /\$500/, 'DELL risks $5 x 100 shares');
-    assert.match(html, /Open P&amp;L/);
-  });
-
-  test('home shows percent change from the entry', () => {
-    // Entry 100, price 112.
-    assert.match(renderHome(state), /\+12\.00%/);
-  });
-
-  test('a protected trade shows what is locked in rather than what is at risk', () => {
-    // The stop was raised to 100, which is the entry.
-    const html = renderHome(state);
+    assert.match(html, /Protected/);
+    assert.match(html, /DELL/);
     assert.match(html, /Locked in/);
-    assert.ok(!/At risk<\/span>/.test(html.split('DELL')[1] ?? ''), 'not both at once');
   });
 
-  test('price age is shown beside the price', () => {
-    assert.match(renderHome(state), /stamp-age/);
+  test('protected trades do not render an R rail', () => {
+    const html = renderHome(state);
+    const dell = html.split('DELL')[1] ?? '';
+    assert.ok(!dell.includes('v9-rail'), 'protected rows stay compact');
+  });
+
+  test('home shows portfolio P&L and price freshness', () => {
+    const html = renderHome(state);
+    assert.match(html, /Open P&amp;L/);
+    assert.match(html, /Prices as of/);
+    assert.match(html, /manual/);
   });
 
   test('the sync bar appears only while a fetch is running', () => {
@@ -140,25 +124,36 @@ describe('every screen renders with data', () => {
     state.priceSync = null;
   });
 
-  test('trades list', () => {
+  test('trades screen has search and open/closed segmentation', () => {
     const html = renders(renderTrades(state));
+    assert.match(html, /Search trades/);
     assert.match(html, /Open · 1/);
     assert.match(html, /Closed · 1/);
+    assert.match(html, /Activity log/);
   });
 
-  test('trades list shows percent change beside the R result', () => {
+  test('open trades are R-first', () => {
+    state.draft.trades = { tab: 'open', query: '', sort: 'newest', closedVisible: 4 };
     const html = renderTrades(state);
-    assert.match(html, /\+12\.00%/, 'DELL open: entry 100, price 112');
-    assert.match(html, /-6\.00%/, 'JPM closed: entry 50, exit 47');
-    assert.match(html, /-1\.00R/, 'and the R alongside it');
-    assert.match(html, /-\$300/, 'and the dollars');
+    assert.match(html, /\+2\.40R/, 'DELL at 112 on a 5-point risk is +2.4R');
+    assert.match(html, /\+\$1,200/, 'and the dollar result');
   });
 
-  test('an open trade with no price shows a dash for the move, not zero', async () => {
+  test('closed trades show exit reason, duration, R and dollars', () => {
+    state.draft.trades = { tab: 'closed', query: '', sort: 'newest', closedVisible: 4 };
+    const html = renderTrades(state);
+    assert.match(html, /Stop hit/);
+    assert.match(html, /exit 47\.00/);
+    assert.match(html, /-1\.00R/);
+    assert.match(html, /-\$300/);
+  });
+
+  test('an open trade with no price shows a dash rather than a fabricated result', async () => {
     const saved = state.prices;
     state.prices = {};
+    state.draft.trades = { tab: 'open', query: '', sort: 'newest', closedVisible: 4 };
     const html = renderTrades(state);
-    assert.ok(!html.includes('+0.00%'));
+    assert.match(html, /r-chip neutral">—</);
     state.prices = saved;
   });
 
