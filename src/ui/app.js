@@ -127,7 +127,9 @@ function parseRoute() {
 
 export function go(hash) {
   state.draft.overflowOpen = false;
-  location.hash = hash;
+  const next = `#${hash}`;
+  if (location.hash === next) render();
+  else location.hash = hash;
 }
 
 async function refreshRoutePrice() {
