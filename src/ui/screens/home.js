@@ -58,25 +58,47 @@ function neutralRiskRail(t, p) {
   if (!p || !(rps > 0)) return '';
   const stop = t.activeStop;
   const entry = t.entryPrice;
+  const r1 = entry + rps;
   const end = entry + 2 * rps;
   const span = end - stop;
   if (!(span > 0)) return '';
 
-  const nowPct = Math.max(0, Math.min(100, ((p.price - stop) / span) * 100));
+  const clamp = (x) => Math.max(0, Math.min(100, x));
+  const entryPct = clamp(((entry - stop) / span) * 100);
+  const r1Pct = clamp(((r1 - stop) / span) * 100);
+  const nowPct = clamp(((p.price - stop) / span) * 100);
   const r = currentR(t, p.price);
+  const stateTone = rTone(r);
+  const segmentLeft = Math.min(entryPct, nowPct);
+  const segmentWidth = Math.abs(nowPct - entryPct);
+
   return `
     <div class="v9-rail" aria-label="R range from stop to 2R">
       <div class="v9-rail-track"></div>
+      <span class="v9-rail-segment ${stateTone}" style="left:${segmentLeft}%;width:${segmentWidth}%"></span>
       <span class="v9-rail-tick" style="left:0%"></span>
-      <span class="v9-rail-tick" style="left:33.333%"></span>
-      <span class="v9-rail-tick" style="left:66.667%"></span>
+      <span class="v9-rail-tick" style="left:${entryPct}%"></span>
+      <span class="v9-rail-tick" style="left:${r1Pct}%"></span>
       <span class="v9-rail-tick" style="left:100%"></span>
-      <span class="v9-rail-now ${rTone(r)}" style="left:${nowPct}%"></span>
+      <span class="v9-rail-now ${stateTone}" style="left:${nowPct}%"></span>
       <span class="v9-rail-label edge-left" style="left:0%">stop</span>
-      <span class="v9-rail-label" style="left:33.333%">entry</span>
-      <span class="v9-rail-label" style="left:66.667%">1R</span>
+      <span class="v9-rail-label" style="left:${entryPct}%">entry</span>
+      <span class="v9-rail-label" style="left:${r1Pct}%">1R</span>
       <span class="v9-rail-label edge-right" style="left:100%">2R</span>
     </div>`;
+}
+
+function marketLine(t, p) {
+  if (!p || !Number.isFinite(p.price)) {
+    return '<span class="market-line"><span>Now —</span><span>Today —</span></span>';
+  }
+  const move = dailyMove(t, p);
+  const moveClass =
+    move?.dollars == null || Math.abs(move.dollars) < 0.5 ? 'neutral' : move.dollars > 0 ? 'pos' : 'neg';
+  return `<span class="market-line">
+    <span>Now <strong>${fmtPrice(p.price)}</strong></span>
+    <span>Today <strong class="${moveClass}">${move ? `${signedPct(move.percent, 2)} · ${dollars(move.dollars)}` : '—'}</strong></span>
+  </span>`;
 }
 
 function atRiskRow(t) {
@@ -89,9 +111,10 @@ function atRiskRow(t) {
       <div class="risk-row-top">
         <span>
           <strong class="ticker">${esc(t.ticker)}</strong>
+          ${marketLine(t, p)}
           <span class="risk-sub ${below ? 'warn' : ''}">
             ${below ? 'Below stop' : 'stop'} ${fmtPrice(t.activeStop)}
-            ${cash == null ? '' : ` · ${dollars(cash)}`}
+            ${cash == null ? '' : ` · P&amp;L ${dollars(cash)}`}
           </span>
         </span>
         <span class="r-chip ${rTone(r)}">${rText(r)}</span>
@@ -102,13 +125,15 @@ function atRiskRow(t) {
 }
 
 function protectedRow(t) {
+  const p = priceFor(t.ticker);
   const locked = Math.max(0, lockedIn(t));
   return `
     <button class="risk-row protected-row" data-go="trade/${t.id}">
       <div class="risk-row-top">
         <span>
           <strong class="ticker">${esc(t.ticker)}</strong>
-          <span class="risk-sub pos">+${dollars(locked, { sign: false })} locked · stop ${fmtPrice(t.activeStop)}</span>
+          ${marketLine(t, p)}
+          <span class="risk-sub pos">${dollars(locked)} locked · stop ${fmtPrice(t.activeStop)}</span>
         </span>
         <span class="protected-value">${dollars(locked)}</span>
         <span class="trade-chevron">›</span>
@@ -216,7 +241,7 @@ export function renderHome(s) {
             <span class="muted">${pct(risk.total / s.settings.equity, { dp: 2 })} of account</span>
           </div>
         </div>
-        <button class="chip" data-action="syncPrices" ${s.priceSync?.running ? 'disabled' : ''}>
+        <button class="chip update-prices-btn" data-action="syncPrices" ${s.priceSync?.running ? 'disabled' : ''}>
           ${s.priceSync?.running ? 'Updating…' : 'Update prices'}
         </button>
       </div>
