@@ -1,7 +1,7 @@
 /** Settings: backup, account, market snapshots, appearance, data. */
 
 import { ACTIONS } from '../registry.js';
-import { state, setSetting, applyTheme, render, toast, refresh } from '../app.js';
+import { state, setSetting, applyTheme, render, toast, refresh, APP_VERSION, APP_BUILD } from '../app.js';
 import { PRESETS } from '../../core/stopRules.js';
 import { serialize, restore } from '../../data/backup.js';
 import { autoBackup, chooseBackupFolder, hasFileSystemAccess } from '../../data/browserBackup.js';
@@ -112,6 +112,23 @@ export function renderSettings(s) {
           )
           .join('')}
       </div>
+      <div class="field" style="margin:var(--sp-4) 0 0">
+        <span class="label">Accent</span>
+        <div class="chips accent-chips" style="margin-top:var(--sp-2)">
+          ${[
+            ['blue', 'Blue'],
+            ['teal', 'Teal'],
+            ['violet', 'Violet'],
+            ['amber', 'Amber'],
+          ]
+            .map(
+              ([value, label]) =>
+                `<button class="chip accent-choice accent-${value}" data-action="setAccent" data-v="${value}"
+                         aria-pressed="${(s.settings.accent ?? 'blue') === value}">${label}</button>`
+            )
+            .join('')}
+        </div>
+      </div>
     </div>
 
     <div class="section-title"><span class="label">Data</span></div>
@@ -126,7 +143,11 @@ export function renderSettings(s) {
       </div>
     </div>
 
-    <p class="muted" style="text-align:center;margin-top:var(--sp-6);font-size:var(--step--1)">
+    <div class="app-version">
+      <strong>Trade Journal · ${APP_VERSION}</strong>
+      <span>Build ${APP_BUILD}</span>
+    </div>
+    <p class="muted" style="text-align:center;margin-top:var(--sp-3);font-size:var(--step--1)">
       Trading history is stored on this device. Nothing is sent anywhere except quote requests you explicitly trigger.
     </p>`;
 }
@@ -147,6 +168,13 @@ document.addEventListener('change', async (e) => {
 
 ACTIONS.setTheme = async (el) => {
   await setSetting('theme', el.dataset.v);
+  applyTheme();
+  render();
+};
+
+ACTIONS.setAccent = async (el) => {
+  const value = ['blue', 'teal', 'violet', 'amber'].includes(el.dataset.v) ? el.dataset.v : 'blue';
+  await setSetting('accent', value);
   applyTheme();
   render();
 };
