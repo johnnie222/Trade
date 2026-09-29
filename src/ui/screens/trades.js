@@ -35,6 +35,35 @@ function cashResult(t) {
   return p ? totalPnl(t, p.price) : null;
 }
 
+function signedPct(x, dp = 2) {
+  if (x == null || !Number.isFinite(x)) return '—';
+  return `${x > 0 ? '+' : ''}${(x * 100).toFixed(dp)}%`;
+}
+
+function dailyMove(t, p) {
+  if (!p || !Number.isFinite(p.price) || !Number.isFinite(p.previousClose) || !(p.previousClose > 0)) return null;
+  const perShare = p.price - p.previousClose;
+  return {
+    dollars: perShare * t.qty,
+    percent: Number.isFinite(p.dailyPercent) ? p.dailyPercent : perShare / p.previousClose,
+  };
+}
+
+function openMarketLine(t) {
+  if (t.status !== 'OPEN') return '';
+  const p = priceFor(t.ticker);
+  if (!p || !Number.isFinite(p.price)) {
+    return '<span class="trade-market-line"><span>Now —</span><span>Today —</span></span>';
+  }
+  const move = dailyMove(t, p);
+  const moveClass =
+    move?.dollars == null || Math.abs(move.dollars) < 0.5 ? 'neutral' : move.dollars > 0 ? 'pos' : 'neg';
+  return `<span class="trade-market-line">
+    <span>Now <strong>${fmtPrice(p.price)}</strong></span>
+    <span>Today <strong class="${moveClass}">${move ? `${signedPct(move.percent)} · ${dollars(move.dollars)}` : '—'}</strong></span>
+  </span>`;
+}
+
 function rTone(r) {
   if (r == null || !Number.isFinite(r) || Math.abs(r) < 0.1) return 'neutral';
   return r > 0 ? 'pos' : 'neg';
@@ -104,6 +133,7 @@ function tradeRow(t) {
     <button class="trade-list-row" data-go="trade/${t.id}">
       <span class="trade-list-main">
         <strong class="ticker">${esc(t.ticker)}</strong>
+        ${openMarketLine(t)}
         <span class="trade-list-sub">${subtitle(t)}</span>
       </span>
       <span class="trade-list-result">
