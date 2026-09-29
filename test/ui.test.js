@@ -74,7 +74,7 @@ async function seed({ withPrice = true } = {}) {
   );
   await state.repo.appendEvent(b.id, E.close(D(7), { price: 47, reason: 'Stop hit' }));
 
-  if (withPrice) state.prices.DELL = { price: 112, at: D(8), source: 'manual' };
+  if (withPrice) state.prices.DELL = { price: 112, previousClose: 110, dailyPercent: 2 / 110, at: D(8), source: 'manual' };
   state.trades = await state.repo.listTrades();
   state.log = await state.repo.activityLog();
   return { a, b };
@@ -112,6 +112,17 @@ describe('every screen renders with data', () => {
     assert.match(html, /Open P&amp;L/);
     assert.match(html, /Prices as of/);
     assert.match(html, /manual/);
+  });
+
+  test('open positions show current price and daily move', () => {
+    const home = renderHome(state);
+    assert.match(home, /Now <strong>112\.00<\/strong>/);
+    assert.match(home, /Today <strong class="pos">\+1\.82% · \+\$200<\/strong>/);
+
+    state.draft.trades = { tab: 'open', query: '', sort: 'newest', closedVisible: 4 };
+    const trades = renderTrades(state);
+    assert.match(trades, /Now <strong>112\.00<\/strong>/);
+    assert.match(trades, /Today <strong class="pos">\+1\.82% · \+\$200<\/strong>/);
   });
 
   test('the sync bar appears only while a fetch is running', () => {
@@ -203,7 +214,7 @@ describe('every screen renders with data', () => {
     assert.match(html, /50000/);
     assert.ok(!html.includes('Trailing stop'), 'trailing configuration belongs to each trade');
     assert.match(html, /Accent/);
-    assert.match(html, /Trade Journal · V9/);
+    assert.match(html, /Trade Journal · V9\.1/);
   });
 
   test('new trade', () => {
