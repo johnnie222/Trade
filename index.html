@@ -32,5 +32,25 @@
     );
   }
 </script>
+
+<script>
+  // One-time cleanup for the mistakenly deployed Book Scanner PWA.
+  // This only unregisters the old nested scanner worker and removes its cache.
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.getRegistrations().then((registrations) =>
+      Promise.all(
+        registrations
+          .filter((registration) => {
+            try { return new URL(registration.scope).pathname.endsWith('/book-scanner/'); }
+            catch { return false; }
+          })
+          .map((registration) => registration.unregister())
+      )
+    ).catch(() => {});
+  }
+  if ('caches' in window) {
+    caches.delete('book-scanner-v1').catch(() => {});
+  }
+</script>
 </body>
 </html>
